@@ -42,17 +42,17 @@ tailwind.config = {
       </span>
       <div>
         <h1 class="font-bold text-lg leading-tight">Lead Finder</h1>
-        <p class="text-slate-400 text-xs">Website prospecting for SMBs</p>
+        <p class="text-slate-400 text-xs">Website prospecting · <span id="brain-badge" class="text-cta font-semibold">connecting…</span></p>
       </div>
     </div>
-    <div class="flex items-center gap-3 text-sm">
-      <div class="hidden sm:flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5">
+    <div class="flex items-center gap-2 text-sm">
+      <div class="flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5" title="Total leads">
         <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-        <span id="stat-total" class="font-semibold">0</span><span class="text-slate-400">leads</span>
+        <span id="stat-total" class="font-semibold">0</span>
       </div>
-      <div class="hidden sm:flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5">
+      <div class="flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5" title="Pitchable leads">
         <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-3L2 16"/><path d="M16 7h6v6"/></svg>
-        <span id="stat-pitchable" class="font-semibold text-emerald-400">0</span><span class="text-slate-400">pitchable</span>
+        <span id="stat-pitchable" class="font-semibold text-emerald-400">0</span>
       </div>
       <button onclick="openSetup()" title="Settings" class="cursor-pointer p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors duration-200">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -111,7 +111,10 @@ tailwind.config = {
       </div>
     </div>
     <div id="suggestion-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      <p class="text-sm text-slate-400 col-span-full">Run a search to populate suggestions.</p>
+      <div class="skeleton-card col-span-1 h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
+      <div class="skeleton-card col-span-1 h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
+      <div class="hidden sm:block skeleton-card h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
+      <div class="hidden sm:block skeleton-card h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
     </div>
   </section>
 
@@ -158,7 +161,12 @@ tailwind.config = {
         <tbody id="leads-body" class="divide-y divide-gray-100"></tbody>
       </table>
     </div>
-    <p id="leads-empty" class="text-sm text-secondary text-center py-10">No leads yet — run your first search above.</p>
+    <p id="leads-empty" class="hidden text-sm text-secondary text-center py-10">No leads yet — run your first search above.</p>
+    <div id="leads-skeleton" class="space-y-px">
+      <div class="h-12 bg-slate-100 animate-pulse"></div>
+      <div class="h-12 bg-slate-100 animate-pulse"></div>
+      <div class="h-12 bg-slate-100 animate-pulse"></div>
+    </div>
   </section>
 
   <footer class="text-center text-xs text-slate-400 pb-8">Lead Finder · local Ollama gemma4 · Places API · DuckDuckGo enrichment</footer>
@@ -167,8 +175,8 @@ tailwind.config = {
 <!-- DETAIL MODAL -->
 <div id="modal" class="hidden fixed inset-0 z-50">
   <div class="absolute inset-0 bg-primary/60 backdrop-blur-sm" onclick="closeModal()"></div>
-  <div class="relative max-w-3xl mx-auto mt-8 mb-8 max-h-[85vh] overflow-y-auto bg-white rounded-2xl shadow-xl">
-    <div id="modal-content" class="p-6"></div>
+  <div class="absolute inset-x-0 bottom-0 top-auto sm:relative max-w-3xl mx-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] sm:mt-8 overflow-y-auto">
+    <div id="modal-content" class="p-5 sm:p-6"></div>
   </div>
 </div>
 
@@ -277,9 +285,11 @@ async function loadSuggestions(){
         </div>
         <p class="text-xs text-slate-300 truncate">${escapeHtml(l.business_type||'')}</p>
         <p class="text-xs text-slate-400 truncate mt-1">${escapeHtml(l.search_location||'')}</p>
-        <p class="text-[11px] mt-2 font-semibold ${l.website?'text-slate-400':'text-red-300'}">${l.website?'Has website':'No website — best target'}</p>
+        <p class="text-xs font-semibold ${l.website?'text-slate-400':'text-red-300'}">${l.website?'Has website':'No website — best target'}</p>
       </button>`).join('');
-  }catch(e){}
+  }catch(e){
+    $('suggestion-cards').innerHTML = '<p class="text-sm text-slate-400 col-span-full">Could not load suggestions.</p>';
+  }
 }
 
 function escapeHtml(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -301,12 +311,15 @@ async function loadLeads(){
   try{
     const data = await fetchJSON(`/api/leads?sort=${sort}&service=${service}`);
     leadsCache = data.leads;
-    renderLeads();
-  }catch(e){}
+  }catch(e){
+    leadsCache = [];
+  }
+  renderLeads();
 }
 
 function renderLeads(){
   const tbody = $('leads-body');
+  $('leads-skeleton').style.display = 'none';
   $('leads-empty').style.display = leadsCache.length ? 'none' : 'block';
   tbody.innerHTML = leadsCache.map(l=>`
     <tr class="hover:bg-slate-50 transition-colors duration-150 cursor-pointer" onclick="openDetail(${l.id})">
@@ -441,6 +454,27 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeModal(); cl
 async function refreshAll(){
   await Promise.all([loadServices(), loadLeads(), loadSuggestions()]);
 }
+
+async function loadBrainBadge(){
+  try{
+    const c = await fetchJSON('/api/config');
+    const el = $('brain-badge');
+    if(c.provider === 'gemini'){
+      el.textContent = `Gemini ${c.model.replace(/^gemini-/,'')} (cloud)`;
+      el.className = 'text-emerald-400 font-semibold';
+    } else {
+      el.textContent = `${c.model} (local)`;
+    }
+  }catch(e){ $('brain-badge').textContent = 'offline'; }
+}
+
+document.addEventListener('keydown', (e)=>{
+  if(e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){
+    e.preventDefault(); $('business-type').focus();
+  }
+});
+
+loadBrainBadge();
 refreshAll();
 </script>
 </body>

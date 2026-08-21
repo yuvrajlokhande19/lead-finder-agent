@@ -46,8 +46,9 @@ Search "dental clinic in Jaipur"
 |---|---|
 | [Python 3.11+](https://www.python.org/downloads/) | |
 | [uv](https://docs.astral.sh/uv/getting-started/installation/) | Python package manager |
-| [Ollama](https://ollama.com) | Running locally |
-| `gemma4` model pulled | `ollama pull gemma4` |
+| **An LLM brain** — pick ONE: | |
+| ├─ Option A: [Ollama](https://ollama.com) local + `ollama pull gemma4` | 100% offline & free, slower (1–3 min per analysis) |
+| └─ Option B: Google Gemini API key (cloud) | Fast (~10–30 s), free tier — get it at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 
 ### Install (Windows / Linux)
 
@@ -57,24 +58,28 @@ cd lead-finder-agent
 uv sync
 ```
 
-### Configure (optional but recommended)
+### Configure
 
 ```bash
 cp .env.example .env      # Windows: copy .env.example .env
 ```
 
-The app **works immediately without any API key** using free OpenStreetMap search.
-For richer data (phone numbers, ratings, more results), add a free **Google Places API** key:
+**Pick your LLM brain** in `.env`:
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/) → create/select a project
-2. **APIs & Services → Library** → enable **"Places API (New)"**
-3. **Credentials → Create Credentials → API key**
-4. Paste into `.env`:
+```ini
+# Option A — Local (default, fully offline)
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=gemma4
+
+# Option B — Cloud Gemini (fast, no Ollama install needed)
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_key_here
+```
+
+**Search data source** (optional upgrade): the app works immediately with **zero keys** using OpenStreetMap's Overpass API. For richer data (phone numbers, ratings for almost every business), add a free **Google Places API** key (`AIza...` from [Google Cloud Console](https://console.cloud.google.com/) → enable *"Places API (New)"* → Credentials):
 
 ```ini
 GOOGLE_PLACES_API_KEY=your_real_key_here
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gemma4
 ```
 
 ### Run
@@ -154,7 +159,8 @@ lead-finder-agent/
 | Problem | Fix |
 |---|---|
 | Search returns few results | You're on the free OpenStreetMap fallback — add a Places key for full coverage |
-| Analyze fails / hangs | Ensure Ollama is running (`ollama serve`) and gemma4 is pulled |
+| Analyze fails / hangs | Check the brain badge (top-left). On `gemini`: verify `GEMINI_API_KEY`. On `ollama`: run `ollama serve` + keep model pulled |
+| Slow analysis | Local Ollama on CPU takes minutes — switch to `LLM_PROVIDER=gemini` for ~15–30 s analyses |
 | Port 8080 busy | Kill stale process or change port at bottom of `server.py` |
 | Garbled text in console logs | Cosmetic Windows cp1252 issue only; the web app handles Unicode fine |
 

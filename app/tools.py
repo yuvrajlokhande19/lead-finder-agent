@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -495,6 +496,78 @@ def generate_with_ollama(prompt: str, system: str | None = None) -> str:
     return resp.json().get("response", "").strip()
 
 
+GEMINI_MODEL_CHAIN = [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+]
+
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+
+def generate_with_gemini(prompt: str, system: str | None = None) -> str:
+    """Cloud LLM path — Google AI Studio free tier works (no Ollama needed).
+
+    Retries transient errors (429/5xx) and falls back through the model chain
+    so a single overloaded model never breaks analysis.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set. Get a free key at "
+            "https://aistudio.google.com/apikey or set LLM_PROVIDER=ollama."
+        )
+    configured = os.environ.get("GEMINI_MODEL", "").strip()
+    models = ([configured] if configured else []) + [
+        m for m in GEMINI_MODEL_CHAIN if m != configured
+    ]
+
+    last_err: Exception | None = None
+    for model in models:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent"
+        )
+        payload: dict[str, Any] = {"contents": [{"parts": [{"text": prompt}]}]}
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+
+        for attempt in range(2):
+            try:
+                resp = requests.post(
+                    url, params={"key": api_key}, json=payload, timeout=180
+                )
+                resp.raise_for_status()
+                try:
+                    return resp.json()["candidates"][0]["content"]["parts"][0][
+                        "text"
+                    ].strip()
+                except (KeyError, IndexError) as exc:
+                    raise RuntimeError(
+                        f"Gemini returned an unexpected response: "
+                        f"{str(resp.json())[:200]}"
+                    ) from exc
+            except requests.RequestException as exc:
+                last_err = exc
+                code = getattr(getattr(exc, "response", None), "status_code", None)
+                if code not in _RETRYABLE_CODES:
+                    raise
+                time.sleep(2 * (attempt + 1))
+
+    raise RuntimeError(f"All Gemini models failed. Last error: {last_err}")
+
+
+def get_llm_provider() -> str:
+    return os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+
+
+def generate_text(prompt: str, system: str | None = None) -> str:
+    """Dispatch to the configured LLM backend: 'ollama' (local) or 'gemini' (cloud)."""
+    if get_llm_provider() == "gemini":
+        return generate_with_gemini(prompt, system)
+    return generate_with_ollama(prompt, system)
+
+
 def build_uiux_prompt(lead: dict[str, Any], enrichment: list[dict] | None = None) -> str:
     context_lines = [
         f"- Business name: {lead.get('name')}",
@@ -526,7 +599,7 @@ Business details:
 
 Output only the final UI/UX design prompt as a single well-structured brief."""
 
-    return generate_with_ollama(user, system)
+    return generate_text(user, system)
 
 
 def build_outreach_email(lead: dict[str, Any], contact_name: str | None = None) -> str:
@@ -552,7 +625,7 @@ Rules:
 - Use [Your Name] and [Your Agency] placeholders for signature.
 - If contact person is unknown, use a friendly generic greeting."""
 
-    return generate_with_ollama(user, system)
+    return generate_text(user, system)
 
 
 def build_pitch_note(lead: dict[str, Any], enrichment: list[dict] | None = None) -> str:
@@ -580,7 +653,7 @@ In under 120 words output:
 2. NEED: their biggest website need based on business type.
 3. PITCH ANGLE: one sentence on exactly what to say to them."""
 
-    return generate_with_ollama(user, system)
+    return generate_text(user, system)
 
 
 # ---------------------------------------------------------------------------

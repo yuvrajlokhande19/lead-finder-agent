@@ -22,6 +22,7 @@ from app.tools import (
     get_lead,
     get_pitch_summary,
     get_service_types,
+    get_llm_provider,
     search_businesses,
 )
 
@@ -64,6 +65,17 @@ def api_search(req: SearchRequest) -> dict:
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result["message"])
     return result
+
+
+@app.get("/api/config")
+def api_config() -> dict:
+    provider = get_llm_provider()
+    model = (
+        os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+        if provider == "gemini"
+        else os.environ.get("OLLAMA_MODEL", "gemma4")
+    )
+    return {"provider": provider, "model": model}
 
 
 @app.get("/api/leads")
