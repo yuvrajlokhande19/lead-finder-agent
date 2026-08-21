@@ -1,0 +1,586 @@
+"""Core business logic for the Website Lead Finder agent.
+
+Provides:
+- Google Places API (New) text search for businesses
+- DuckDuckGo web enrichment (owner / decision-maker info)
+- SQLite lead storage
+- Local Ollama text generation (UI/UX prompts + outreach emails)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+import requests
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DB_PATH = ROOT_DIR / "leads.db"
+
+PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+OSM_USER_AGENT = "LeadFinderAgent/0.1 (local web-design prospecting tool)"
+
+PLACES_FIELD_MASK = (
+    "places.id,places.displayName,places.formattedAddress,"
+    "places.nationalPhoneNumber,places.websiteUri,places.rating,"
+    "places.userRatingCount,places.primaryTypeDisplayName,places.googleMapsUri"
+)
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    place_id TEXT UNIQUE,
+    name TEXT NOT NULL,
+    business_type TEXT,
+    address TEXT,
+    phone TEXT,
+    website TEXT,
+    rating REAL,
+    reviews INTEGER,
+    maps_uri TEXT,
+    search_location TEXT,
+    tier TEXT,
+    score INTEGER DEFAULT 0,
+    score_reasons TEXT,
+    pitch_note TEXT,
+    enrichment_json TEXT,
+    uiux_prompt TEXT,
+    email_draft TEXT,
+    analyzed INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+# India tier-1 metros — everything else is treated as tier 2/3 (higher opportunity)
+TIER_1_CITIES = {
+    "mumbai", "delhi", "new delhi", "bangalore", "bengaluru", "hyderabad",
+    "chennai", "kolkata", "pune", "ahmedabad",
+}
+
+
+def detect_tier(location: str) -> str:
+    loc = (location or "").lower()
+    if any(city in loc for city in TIER_1_CITIES):
+        return "Tier 1"
+    return "Tier 2/3"
+
+
+def compute_lead_score(lead: dict[str, Any]) -> dict[str, Any]:
+    """Rule-based pitch-chance score (0-100) from available business signals."""
+    score = 30  # baseline: every SMB is a potential client
+    reasons: list[str] = []
+
+    if not lead.get("website"):
+        score += 25
+        reasons.append("No website found — high need (+25)")
+    else:
+        score += 5
+        reasons.append("Has a website — redesign pitch only (+5)")
+
+    reviews = lead.get("reviews") or 0
+    if reviews >= 200:
+        score += 15
+        reasons.append(f"Well-established ({reviews} reviews) (+15)")
+    elif reviews >= 50:
+        score += 8
+        reasons.append(f"Established ({reviews} reviews) (+8)")
+
+    rating = lead.get("rating") or 0
+    if rating >= 4.3:
+        score += 10
+        reasons.append(f"Strong reputation ({rating}) (+10)")
+    elif rating >= 3.5:
+        score += 5
+        reasons.append(f"Decent reputation ({rating}) (+5)")
+
+    if lead.get("phone"):
+        score += 5
+        reasons.append("Phone available — directly contactable (+5)")
+
+    tier = lead.get("tier") or detect_tier(lead.get("search_location", ""))
+    if tier == "Tier 2/3":
+        score += 10
+        reasons.append("Tier 2/3 location — less competition, growing market (+10)")
+
+    score = min(score, 100)
+    return {"score": score, "tier": tier, "reasons": reasons}
+
+
+def score_label(score: int) -> str:
+    if score >= 70:
+        return "High"
+    if score >= 45:
+        return "Medium"
+    return "Low"
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute(_SCHEMA)
+    return conn
+
+
+# ---------------------------------------------------------------------------
+# Google Places API (New) — text search
+# ---------------------------------------------------------------------------
+
+def _search_osm(business_type: str, location: str, max_results: int) -> list[dict[str, Any]]:
+    """Free fallback search via OpenStreetMap Nominatim (no API key required)."""
+    params = {
+        "q": f"{business_type} in {location}",
+        "format": "jsonv2",
+        "addressdetails": 1,
+        "extratags": 1,
+        "limit": min(max_results + 10, 40),
+    }
+    resp = requests.get(
+        NOMINATIM_SEARCH_URL, params=params,
+        headers={"User-Agent": OSM_USER_AGENT}, timeout=30,
+    )
+    resp.raise_for_status()
+    results: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for it in resp.json():
+        tags = it.get("extratags") or {}
+        name = (it.get("name") or "").strip() or (
+            (it.get("display_name") or "").split(",")[0].strip()
+        )
+        if not name or name.lower() in seen_names:
+            continue
+        seen_names.add(name.lower())
+        btype = it.get("addresstype") or it.get("type") or business_type
+        results.append({
+            "place_id": f"osm_{it.get('osm_type', 'n')}_{it.get('osm_id')}",
+            "name": name,
+            "business_type": str(btype).replace("_", " ").title(),
+            "address": it.get("display_name"),
+            "phone": tags.get("phone") or tags.get("contact:phone"),
+            "website": tags.get("website") or tags.get("contact:website"),
+            "rating": None,
+            "reviews": None,
+            "maps_uri": None,
+        })
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def search_businesses(business_type: str, location: str, max_results: int = 20) -> dict[str, Any]:
+    """Search for a business type in a location and store new leads.
+
+    Uses Google Places API when a key is configured in .env; otherwise falls
+    back to the free OpenStreetMap Nominatim service (no key needed).
+    """
+    api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
+    use_google = bool(api_key) and "PASTE" not in api_key.upper()
+
+    normalized: list[dict[str, Any]] = []
+    source = "google_places"
+
+    if use_google:
+        body = {
+            "textQuery": f"{business_type} in {location}",
+            "pageSize": min(max_results, 20),
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": api_key,
+            "X-Goog-FieldMask": PLACES_FIELD_MASK,
+        }
+        try:
+            resp = requests.post(
+                PLACES_TEXT_SEARCH_URL, json=body, headers=headers, timeout=30
+            )
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            detail = ""
+            try:
+                detail = resp.json().get("error", {}).get("message", "")
+            except Exception:
+                pass
+            return {"status": "error", "message": f"Places API failed: {exc} {detail}"}
+
+        for p in resp.json().get("places", [])[:max_results]:
+            if not p.get("id"):
+                continue
+            normalized.append({
+                "place_id": p["id"],
+                "name": p.get("displayName", {}).get("text", "Unknown"),
+                "business_type": p.get("primaryTypeDisplayName", {}).get("text", business_type),
+                "address": p.get("formattedAddress"),
+                "phone": p.get("nationalPhoneNumber"),
+                "website": p.get("websiteUri"),
+                "rating": p.get("rating"),
+                "reviews": p.get("userRatingCount"),
+                "maps_uri": p.get("googleMapsUri"),
+            })
+    else:
+        source = "openstreetmap"
+        try:
+            normalized = _search_osm(business_type, location, max_results)
+        except Exception as exc:
+            return {"status": "error", "message": f"OpenStreetMap search failed: {exc}"}
+        if not normalized:
+            return {
+                "status": "ok",
+                "source": source,
+                "found": 0,
+                "new_leads_saved": 0,
+                "already_in_db": 0,
+                "note": "No OpenStreetMap results. Add a Google Places API key in .env for much better coverage.",
+                "leads": [],
+            }
+
+    saved, skipped = [], 0
+    with _connect() as conn:
+        for item in normalized:
+            pid = item["place_id"]
+            existing = conn.execute(
+                "SELECT id FROM leads WHERE place_id = ?", (pid,)
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+            item["search_location"] = location
+            cur = conn.execute(
+                """INSERT INTO leads
+                   (place_id, name, business_type, address, phone, website,
+                    rating, reviews, maps_uri, search_location, tier,
+                    score, score_reasons)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    item["place_id"],
+                    item["name"],
+                    item["business_type"],
+                    item["address"],
+                    item["phone"],
+                    item["website"],
+                    item["rating"],
+                    item["reviews"],
+                    item["maps_uri"],
+                    location,
+                    detect_tier(location),
+                    0,
+                    None,
+                ),
+            )
+            scored = compute_lead_score(item)
+            conn.execute(
+                "UPDATE leads SET tier = ?, score = ?, score_reasons = ? WHERE id = ?",
+                (scored["tier"], scored["score"], json.dumps(scored["reasons"]), cur.lastrowid),
+            )
+            saved.append(
+                {"lead_id": cur.lastrowid, "name": item["name"], "score": scored["score"]}
+            )
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "source": source,
+        "found": len(normalized),
+        "new_leads_saved": len(saved),
+        "already_in_db": skipped,
+        "leads": [
+            {"lead_id": s["lead_id"], "name": s["name"], "score": s["score"]}
+            for s in saved
+        ],
+    }
+    if source == "openstreetmap":
+        result["note"] = (
+            "Searched via free OpenStreetMap (phones/ratings often missing). "
+            "Add a Google Places API key to .env for richer data."
+        )
+    return result
+
+
+
+# ---------------------------------------------------------------------------
+# DuckDuckGo enrichment (free, no key)
+# ---------------------------------------------------------------------------
+
+def enrich_contact(business_name: str, location: str) -> dict[str, Any]:
+    """Web-search for owner / founder / decision-maker info about a business."""
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        from duckduckgo_search import DDGS  # fallback package name
+
+    queries = [
+        f'"{business_name}" {location} owner OR founder OR director',
+        f'"{business_name}" {location} contact email phone',
+    ]
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        with DDGS() as ddgs:
+            for q in queries:
+                for r in ddgs.text(q, max_results=6):
+                    url = r.get("href") or r.get("url")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    results.append(
+                        {
+                            "title": r.get("title"),
+                            "url": url,
+                            "snippet": r.get("body"),
+                        }
+                    )
+    except Exception as exc:
+        return {"status": "error", "message": f"Web enrichment failed: {exc}", "results": []}
+
+    return {"status": "ok", "results": results[:10]}
+
+
+# ---------------------------------------------------------------------------
+# Local Ollama generation
+# ---------------------------------------------------------------------------
+
+def generate_with_ollama(prompt: str, system: str | None = None) -> str:
+    base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.environ.get("OLLAMA_MODEL", "gemma4")
+    payload: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+    if system:
+        payload["system"] = system
+    resp = requests.post(f"{base}/api/generate", json=payload, timeout=600)
+    resp.raise_for_status()
+    return resp.json().get("response", "").strip()
+
+
+def build_uiux_prompt(lead: dict[str, Any], enrichment: list[dict] | None = None) -> str:
+    context_lines = [
+        f"- Business name: {lead.get('name')}",
+        f"- Type: {lead.get('business_type')}",
+        f"- Location: {lead.get('address') or lead.get('search_location')}",
+        f"- Phone: {lead.get('phone')}",
+        f"- Current website: {lead.get('website') or 'None found'}",
+        f"- Rating: {lead.get('rating')} ({lead.get('reviews')} reviews)",
+    ]
+    if enrichment:
+        snippets = "\n".join(
+            f"  - {r.get('title')}: {(r.get('snippet') or '')[:200]}"
+            for r in enrichment[:5]
+        )
+        context_lines.append(f"- Web findings:\n{snippets}")
+
+    system = (
+        "You are an expert UI/UX designer. You produce precise, ready-to-use "
+        "design prompts that another AI or designer can execute to build a "
+        "complete website demo."
+    )
+    user = f"""Create a detailed UI/UX prompt for designing a modern website demo for this business.
+The prompt must specify: design style/theme, color palette (with hex codes), typography,
+page structure (home, about, services, gallery, contact), key sections per page,
+imagery style, mobile responsiveness notes, and any special features suited to this business type.
+
+Business details:
+{chr(10).join(context_lines)}
+
+Output only the final UI/UX design prompt as a single well-structured brief."""
+
+    return generate_with_ollama(user, system)
+
+
+def build_outreach_email(lead: dict[str, Any], contact_name: str | None = None) -> str:
+    has_site = bool(lead.get("website"))
+    system = (
+        "You are a polite, concise B2B outreach writer for a web design agency. "
+        "Write emails that are short, specific, and never spammy."
+    )
+    user = f"""Draft a professional outreach email offering website design services.
+
+Business: {lead.get('name')}
+Type: {lead.get('business_type')}
+Location: {lead.get('address')}
+Contact person: {contact_name or 'Unknown'}
+Current website: {lead.get('website') or 'They do NOT appear to have a website'}
+
+Rules:
+- Subject line first, then blank line, then the email body.
+- Max 150 words in the body.
+- Mention one concrete benefit tailored to their business type.
+{f"- Note their current site ({lead['website']}) could be improved." if has_site else "- Emphasize they are missing out on customers by not having a website."}
+- End with a soft call to action (quick call or reply).
+- Use [Your Name] and [Your Agency] placeholders for signature.
+- If contact person is unknown, use a friendly generic greeting."""
+
+    return generate_with_ollama(user, system)
+
+
+def build_pitch_note(lead: dict[str, Any], enrichment: list[dict] | None = None) -> str:
+    """Short AI assessment of the chance to win this client and how to pitch."""
+    system = (
+        "You are a pragmatic sales strategist for a web design agency "
+        "targeting Indian SMBs. Be realistic and concise."
+    )
+    findings = ""
+    if enrichment:
+        findings = "\n".join(
+            f"- {(r.get('snippet') or '')[:150]}" for r in (enrichment[:4])
+        )
+    user = f"""Assess this business as a web-design client prospect.
+
+Business: {lead.get('name')} ({lead.get('business_type')})
+Location: {lead.get('address') or lead.get('search_location')} — City tier: {lead.get('tier')}
+Rating: {lead.get('rating')} from {lead.get('reviews')} reviews
+Website: {lead.get('website') or 'NONE'}
+Web findings:
+{findings or '- none'}
+
+In under 120 words output:
+1. CHANCE: High/Medium/Low to win them as a client and why.
+2. NEED: their biggest website need based on business type.
+3. PITCH ANGLE: one sentence on exactly what to say to them."""
+
+    return generate_with_ollama(user, system)
+
+
+# ---------------------------------------------------------------------------
+# Lead persistence helpers
+# ---------------------------------------------------------------------------
+
+def save_lead_analysis(
+    lead_id: int,
+    enrichment: dict[str, Any],
+    uiux_prompt: str,
+    email_draft: str,
+    pitch_note: str | None = None,
+) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE leads
+               SET enrichment_json = ?, uiux_prompt = ?, email_draft = ?,
+                   pitch_note = COALESCE(?, pitch_note), analyzed = 1
+               WHERE id = ?""",
+            (json.dumps(enrichment), uiux_prompt, email_draft, pitch_note, lead_id),
+        )
+
+
+def get_all_leads(
+    sort: str = "score",
+    service: str | None = None,
+) -> list[dict[str, Any]]:
+    order_by = {
+        "score": "score DESC, rating DESC",
+        "name": "name ASC",
+        "rating": "rating DESC",
+        "reviews": "reviews DESC",
+        "newest": "id DESC",
+    }.get(sort, "score DESC")
+
+    query = f"""
+        SELECT id, name, business_type, address, phone, website, rating,
+               reviews, maps_uri, search_location, tier, score,
+               score_reasons, pitch_note, uiux_prompt, email_draft,
+               analyzed, created_at
+        FROM leads
+    """
+    params: list[Any] = []
+    if service and service.lower() not in ("all", ""):
+        query += " WHERE LOWER(business_type) LIKE ?"
+        params.append(f"%{service.lower()}%")
+    query += f" ORDER BY {order_by}"
+
+    with _connect() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_service_types() -> list[str]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT business_type FROM leads WHERE business_type IS NOT NULL"
+        ).fetchall()
+        return sorted({r["business_type"] for r in rows})
+
+
+def get_pitch_summary(min_score: int = 45, limit: int = 8) -> dict[str, Any]:
+    """Summary of how many businesses are worth pitching + top suggestions."""
+    with _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
+        pitchable = conn.execute(
+            "SELECT COUNT(*) AS c FROM leads WHERE score >= ?", (min_score,)
+        ).fetchone()["c"]
+        analyzed = conn.execute(
+            "SELECT COUNT(*) AS c FROM leads WHERE analyzed = 1"
+        ).fetchone()["c"]
+        by_type_rows = conn.execute(
+            """SELECT business_type, COUNT(*) AS c FROM leads
+               GROUP BY business_type ORDER BY c DESC LIMIT 10"""
+        ).fetchall()
+        top = conn.execute(
+            """SELECT id, name, business_type, address, search_location, tier,
+                      score, rating, reviews, website, analyzed
+               FROM leads WHERE score >= ? ORDER BY score DESC LIMIT ?""",
+            (min_score, limit),
+        ).fetchall()
+
+    return {
+        "total_leads": total,
+        "pitchable_leads": pitchable,
+        "analyzed_leads": analyzed,
+        "min_score": min_score,
+        "by_business_type": [dict(r) for r in by_type_rows],
+        "top_suggestions": [dict(r) for r in top],
+    }
+
+
+def get_lead(lead_id: int) -> dict[str, Any] | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+        if row is None:
+            return None
+        lead = dict(row)
+        lead["enrichment"] = (
+            json.loads(lead.pop("enrichment_json")) if lead.get("enrichment_json") else None
+        )
+        return lead
+
+
+def delete_lead(lead_id: int) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+        return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline used by both the agent tool and the web server
+# ---------------------------------------------------------------------------
+
+def analyze_lead_pipeline(lead_id: int) -> dict[str, Any]:
+    lead = get_lead(lead_id)
+    if lead is None:
+        return {"status": "error", "message": f"Lead {lead_id} not found"}
+
+    enrichment = enrich_contact(lead["name"], lead["search_location"] or "")
+
+    contact_name = None
+    if enrichment.get("results"):
+        first = enrichment["results"][0].get("title") or ""
+        for token in (" - ", " | ", " · "):
+            if token in first:
+                candidate = first.split(token)[0].strip()
+                if candidate and len(candidate) < 60 and lead["name"].lower() not in candidate.lower():
+                    contact_name = candidate
+                break
+
+    uiux_prompt = build_uiux_prompt(lead, enrichment.get("results"))
+    email_draft = build_outreach_email(lead, contact_name)
+
+    pitch_note = None
+    try:
+        pitch_note = build_pitch_note(lead, enrichment.get("results"))
+    except Exception as exc:
+        pitch_note = f"(Pitch note generation failed: {exc})"
+
+    save_lead_analysis(lead_id, enrichment, uiux_prompt, email_draft, pitch_note)
+
+    return {
+        "status": "ok",
+        "lead": get_lead(lead_id),
+        "likely_contact_person": contact_name,
+    }
