@@ -82,7 +82,7 @@ tailwind.config = {
       </span>
       Find Businesses
     </h2>
-    <p class="text-sm text-slate-500 mb-4">One bar, Google-style — the AI understands typos & finds related categories too.</p>
+    <p class="text-sm text-slate-500 mb-4">One bar, Google-style — the AI understands typos & finds related categories too. <span class="text-slate-400">Typically 10–25 s (multiple sources in parallel).</span></p>
     <form id="search-form" class="flex flex-col md:flex-row gap-3">
       <div class="neo-inset flex-1 flex items-center gap-3 rounded-2xl px-4 py-1">
         <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -309,7 +309,10 @@ $('search-form').addEventListener('submit', async (e)=>{
   const btn = $('search-btn'), label = btn.querySelector('.btn-label');
   $('error-banner').classList.add('hidden'); $('search-result').classList.add('hidden'); $('ai-note').classList.add('hidden');
   btn.disabled = true;
-  label.innerHTML = '<span class="spinner mr-2 align-middle"></span>Searching…';
+  let stage = 0;
+  const stages = ['Searching…','Understanding your query…','Reading directories…','Merging results…'];
+  label.innerHTML = '<span class="spinner mr-2 align-middle"></span>' + stages[0];
+  const stageTimer = setInterval(()=>{ stage=Math.min(stage+1,stages.length-1); label.innerHTML = '<span class="spinner mr-2 align-middle"></span>'+stages[stage]; }, 6000);
   try{
     const body = JSON.stringify({
       query: $('search-input').value.trim(),
@@ -343,6 +346,7 @@ $('search-form').addEventListener('submit', async (e)=>{
       ? 'Places API key missing. Click the gear icon (top-right) for setup instructions.'
       : 'Search failed: ' + err.message;
   }finally{
+    clearInterval(stageTimer);
     btn.disabled=false; label.textContent='Search';
   }
 });

@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,9 @@ def parse_search_query(query: str) -> dict[str, Any] | None:
             return {"business_type": b, "location": a, "via": "comma"}
 
     # AI path for anything else ("wardha clinics", misspellings…)
+    cache_key = f"parse|{q.lower()}"
+    if cache_key in _AI_CACHE:
+        return _AI_CACHE[cache_key]
     try:
         raw = generate_text(
             f'Split this search into a business category and a city/area. '
@@ -101,7 +105,9 @@ def parse_search_query(query: str) -> dict[str, Any] | None:
             d = json.loads(m.group(0))
             bt, loc = str(d.get("business_type", "")).strip(), str(d.get("location", "")).strip()
             if bt and loc:
-                return {"business_type": bt, "location": loc, "via": "ai"}
+                out = {"business_type": bt, "location": loc, "via": "ai"}
+                _AI_CACHE[cache_key] = out
+                return out
     except Exception:
         pass
 
@@ -118,13 +124,20 @@ def _osm_tags_for(business_type: str) -> list[tuple[str, str]]:
     return pairs
 
 
+_AI_CACHE: dict[str, Any] = {}
+
+
 def ai_expand_search(business_type: str, location: str) -> dict[str, Any] | None:
     """Ask the LLM to understand the search: fix typos, normalize the
     category, and suggest related business categories worth including.
 
     Returns {corrected_type, corrected_location, related:[...]} or None on
     any failure (the caller then falls back to static tag mapping).
+    Results are cached — repeat searches skip the LLM entirely.
     """
+    cache_key = f"{business_type}|{location}".lower()
+    if cache_key in _AI_CACHE:
+        return _AI_CACHE[cache_key]
     prompt = f"""Understand this business search and reply with ONLY compact JSON:
 {{"corrected_type": "...", "corrected_location": "...", "related": ["...", "..."]}}
 
@@ -148,6 +161,7 @@ Rules:
             "corrected_location": str(data.get("corrected_location") or location).strip(),
             "related": [str(x).strip() for x in (data.get("related") or [])][:5],
         }
+        _AI_CACHE[cache_key] = out
         return out
     except Exception:
         return None
@@ -510,21 +524,27 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
     if not normalized:
         source = "openstreetmap"
         try:
-            try:
-                related_pairs = [
-                    t for r in related_used for t in _osm_tags_for(r)
-                ]
-                normalized = _search_overpass(
-                    eff_type, eff_loc, max_results, extra_tags=related_pairs
-                )
-            except Exception:
-                normalized = []  # Overpass down → Nominatim still runs below
+            related_pairs = [t for r in related_used for t in _osm_tags_for(r)]
 
-            # Always merge Nominatim results too — maximizes total businesses found
-            try:
-                nom = _search_osm(eff_type, eff_loc, max_results)
-            except Exception:
-                nom = []
+            def _ov() -> list[dict[str, Any]]:
+                try:
+                    return _search_overpass(
+                        eff_type, eff_loc, max_results, extra_tags=related_pairs
+                    )
+                except Exception:
+                    return []
+
+            def _nm() -> list[dict[str, Any]]:
+                try:
+                    return _search_osm(eff_type, eff_loc, max_results)
+                except Exception:
+                    return []
+
+            # Run both sources simultaneously — total wait ≈ slowest, not sum
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                ov_res, nom = pool.submit(_ov).result(), pool.submit(_nm).result()
+            normalized = ov_res
+
             seen_keys = {
                 n["place_id"] for n in normalized
             } | {n["name"].lower()[:40] for n in normalized}

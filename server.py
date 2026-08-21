@@ -50,7 +50,9 @@ app = FastAPI(title="Website Lead Finder")
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = ""
+    business_type: str = ""   # legacy shape (old tabs)
+    location: str = ""
     max_results: int = 20
 
 
@@ -61,7 +63,16 @@ def index() -> FileResponse:
 
 @app.post("/api/search")
 def api_search(req: SearchRequest) -> dict:
-    parsed = parse_search_query(req.query)
+    if req.query.strip():
+        parsed = parse_search_query(req.query)
+    elif req.business_type.strip() and req.location.strip():
+        parsed = {
+            "business_type": req.business_type.strip(),
+            "location": req.location.strip(),
+            "via": "fields",
+        }
+    else:
+        parsed = None
     if not parsed or not parsed.get("business_type"):
         raise HTTPException(status_code=400, detail="Empty search")
     if not parsed.get("location"):
