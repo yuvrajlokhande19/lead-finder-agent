@@ -25,7 +25,11 @@ DB_PATH = ROOT_DIR / "leads.db"
 PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
 OSM_USER_AGENT = "LeadFinderAgent/0.1 (local web-design prospecting tool)"
 
 # Maps common business-type words to OpenStreetMap tag pairs for Overpass queries
@@ -72,6 +76,41 @@ def _osm_tags_for(business_type: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def ai_expand_search(business_type: str, location: str) -> dict[str, Any] | None:
+    """Ask the LLM to understand the search: fix typos, normalize the
+    category, and suggest related business categories worth including.
+
+    Returns {corrected_type, corrected_location, related:[...]} or None on
+    any failure (the caller then falls back to static tag mapping).
+    """
+    prompt = f"""Understand this business search and reply with ONLY compact JSON:
+{{"corrected_type": "...", "corrected_location": "...", "related": ["...", "..."]}}
+
+SEARCH: "{business_type}" in "{location}"
+
+Rules:
+- Fix spelling/mistakes in both fields (e.g. "denatl clinc" -> "dental clinic", "jaipr" -> "Jaipur").
+- corrected_type: the clean, standard business category in English lowercase.
+- related: 2-5 nearby categories a customer of this business would also care about \
+(e.g. dental clinic -> ["doctor", "hospital", "pharmacy"]). Empty list if none.
+- No commentary, no markdown fences — JSON only."""
+    try:
+        raw = generate_text(prompt).strip()
+        raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE).strip()
+        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+        out = {
+            "corrected_type": str(data.get("corrected_type") or business_type).strip(),
+            "corrected_location": str(data.get("corrected_location") or location).strip(),
+            "related": [str(x).strip() for x in (data.get("related") or [])][:5],
+        }
+        return out
+    except Exception:
+        return None
+
+
 def _nominatim_bbox(location: str) -> list[str] | None:
     """Geocode a location string to an OSM bounding box [s, n, w, e]."""
     resp = requests.get(
@@ -85,7 +124,12 @@ def _nominatim_bbox(location: str) -> list[str] | None:
     return data[0]["boundingbox"] if data else None
 
 
-def _search_overpass(business_type: str, location: str, max_results: int) -> list[dict[str, Any]]:
+def _search_overpass(
+    business_type: str,
+    location: str,
+    max_results: int,
+    extra_tags: list[tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Structured POI search via the free Overpass API (no key needed).
 
     Much better business coverage than plain Nominatim text search because it
@@ -94,26 +138,45 @@ def _search_overpass(business_type: str, location: str, max_results: int) -> lis
     bbox = _nominatim_bbox(location)
     if not bbox:
         return []
-    s, n, w, e = bbox
+    s, n, w, e = (float(x) for x in bbox)
+    # Pad tiny bounding boxes (landmark-level matches) so city searches get enough area
+    min_span = 0.12
+    if n - s < min_span:
+        mid, half = (n + s) / 2, min_span / 2
+        s, n = mid - half, mid + half
+    if e - w < min_span:
+        mid, half = (e + w) / 2, min_span / 2
+        w, e = mid - half, mid + half
 
-    tag_pairs = _osm_tags_for(business_type)
+    tag_pairs = list(dict.fromkeys((extra_tags or []) + _osm_tags_for(business_type)))
     if not tag_pairs:
         return []  # caller falls back to Nominatim text search
 
     union = "\n".join(
         f'  node["{k}"="{v}"]({s},{w},{n},{e});\n'
         f'  way["{k}"="{v}"]({s},{w},{n},{e});'
-        for k, v in tag_pairs[:6]
+        for k, v in tag_pairs[:10]
     )
-    query = f"[out:json][timeout:30];\n(\n{union}\n);\nout center tags {min(max_results + 20, 80)};"
+    query = f"[out:json][timeout:40];\n(\n{union}\n);\nout center tags {min(max_results * 3 + 40, 160)};"
 
-    resp = requests.post(
-        OVERPASS_URL,
-        data={"data": query},
-        headers={"User-Agent": OSM_USER_AGENT},
-        timeout=60,
-    )
-    resp.raise_for_status()
+    last_exc: Exception | None = None
+    data = None
+    for ov_url in OVERPASS_URLS:
+        try:
+            resp = requests.post(
+                ov_url,
+                data={"data": query},
+                headers={"User-Agent": OSM_USER_AGENT},
+                timeout=45,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if data is None:
+        raise RuntimeError(f"All Overpass mirrors failed: {last_exc}")
 
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -256,7 +319,20 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(_SCHEMA)
+    try:
+        conn.execute("ALTER TABLE leads ADD COLUMN batch_id TEXT")
+    except Exception:
+        pass
     return conn
+
+
+def get_latest_batch_id() -> str | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT batch_id FROM leads WHERE batch_id IS NOT NULL "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return row["batch_id"] if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -314,13 +390,33 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
     use_google = bool(api_key) and len(api_key) > 10
 
+    # --- AI understanding: fix typos, normalize category, find related ones ---
+    ai_note = None
+    related_used: list[str] = []
+    ai = ai_expand_search(business_type, location)
+    if ai:
+        eff_type = ai["corrected_type"] or business_type
+        eff_loc = ai["corrected_location"] or location
+        related_used = ai["related"]
+        if (
+            eff_type.lower() != business_type.lower()
+            or eff_loc.lower() != location.lower()
+        ):
+            ai_note = f"Understood as \u201c{eff_type}\u201d in \u201c{eff_loc}\u201d"
+        elif related_used:
+            ai_note = None
+    else:
+        eff_type, eff_loc = business_type, location
+
+    batch_id = f"b_{int(time.time() * 1000)}"
+
     normalized: list[dict[str, Any]] = []
     source = "google_places"
     google_note = ""
 
     if use_google:
         body = {
-            "textQuery": f"{business_type} in {location}",
+            "textQuery": f"{eff_type} in {eff_loc}",
             "pageSize": min(max_results, 20),
         }
         headers = {
@@ -372,9 +468,17 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
     if not normalized:
         source = "openstreetmap"
         try:
-            normalized = _search_overpass(business_type, location, max_results)
+            try:
+                related_pairs = [
+                    t for r in related_used for t in _osm_tags_for(r)
+                ]
+                normalized = _search_overpass(
+                    eff_type, eff_loc, max_results, extra_tags=related_pairs
+                )
+            except Exception:
+                normalized = []  # Overpass down → fall through to Nominatim
             if not normalized:
-                normalized = _search_osm(business_type, location, max_results)
+                normalized = _search_osm(eff_type, eff_loc, max_results)
         except Exception as exc:
             msg = f"OpenStreetMap search failed: {exc}"
             if google_note:
@@ -396,8 +500,8 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
                 """INSERT INTO leads
                    (place_id, name, business_type, address, phone, website,
                     rating, reviews, maps_uri, search_location, tier,
-                    score, score_reasons)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    score, score_reasons, batch_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     item["place_id"],
                     item["name"],
@@ -412,6 +516,7 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
                     detect_tier(location),
                     0,
                     None,
+                    batch_id,
                 ),
             )
             scored = compute_lead_score(item)
@@ -426,6 +531,9 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
     result: dict[str, Any] = {
         "status": "ok",
         "source": source,
+        "batch_id": batch_id,
+        "understood": {"type": eff_type, "location": eff_loc},
+        "related_used": related_used,
         "found": len(normalized),
         "new_leads_saved": len(saved),
         "already_in_db": skipped,
@@ -434,6 +542,8 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
             for s in saved
         ],
     }
+    if ai_note:
+        result["ai_note"] = ai_note
     if source == "openstreetmap":
         result["note"] = (
             google_note
@@ -681,6 +791,7 @@ def save_lead_analysis(
 def get_all_leads(
     sort: str = "score",
     service: str | None = None,
+    batch: str | None = None,
 ) -> list[dict[str, Any]]:
     order_by = {
         "score": "score DESC, rating DESC",
@@ -698,9 +809,20 @@ def get_all_leads(
         FROM leads
     """
     params: list[Any] = []
+    wheres: list[str] = []
+    if batch == "latest":
+        latest = get_latest_batch_id()
+        if latest:
+            wheres.append("batch_id = ?")
+            params.append(latest)
+    elif batch:
+        wheres.append("batch_id = ?")
+        params.append(batch)
     if service and service.lower() not in ("all", ""):
-        query += " WHERE LOWER(business_type) LIKE ?"
+        wheres.append("LOWER(business_type) LIKE ?")
         params.append(f"%{service.lower()}%")
+    if wheres:
+        query += " WHERE " + " AND ".join(wheres)
     query += f" ORDER BY {order_by}"
 
     with _connect() as conn:

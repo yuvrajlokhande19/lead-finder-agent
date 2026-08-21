@@ -81,8 +81,8 @@ def api_config() -> dict:
 
 
 @app.get("/api/leads")
-def api_leads(sort: str = "score", service: str | None = None) -> dict:
-    return {"leads": get_all_leads(sort=sort, service=service)}
+def api_leads(sort: str = "score", service: str | None = None, batch: str | None = None) -> dict:
+    return {"leads": get_all_leads(sort=sort, service=service, batch=batch)}
 
 
 @app.get("/api/services")

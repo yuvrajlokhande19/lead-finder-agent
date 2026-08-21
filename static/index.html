@@ -28,7 +28,28 @@ tailwind.config = {
   .spinner { border: 3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:9999px; width:1rem; height:1rem; animation:spin .7s linear infinite; display:inline-block;}
   .spinner-dark { border: 3px solid rgba(15,23,42,.15); border-top-color:#0369A1; }
   @keyframes spin { to { transform: rotate(360deg);} }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(10px);} to { opacity:1; transform:none;} }
+  .fade-up { animation: fadeUp .45s cubic-bezier(.22,.68,.43,1) both; }
+  .fade-up-1{animation-delay:.05s} .fade-up-2{animation-delay:.12s} .fade-up-3{animation-delay:.2s}
   @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important;} }
+
+  /* Glassy sticky navbar */
+  .nav-glass { backdrop-filter: blur(14px); background: rgba(15,23,42,.88); }
+  /* Hero search glow */
+  .hero-glow { position:relative; overflow:hidden; }
+  .hero-glow::before { content:''; position:absolute; inset:-40% -20% auto auto; width:340px; height:340px;
+    background: radial-gradient(circle, rgba(3,105,161,.16), transparent 65%); pointer-events:none; }
+  /* Card hover lift */
+  .lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+  .lift:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -12px rgba(15,23,42,.25); }
+  /* Suggestion card sheen */
+  .sheen { position:relative; overflow:hidden; }
+  .sheen::after { content:''; position:absolute; top:0; left:-70%; width:50%; height:100%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,.14), transparent);
+    transform: skewX(-18deg); transition:left .55s ease; pointer-events:none; }
+  .sheen:hover::after { left:130%; }
+  button:active:not(:disabled) { transform: scale(.97); }
+  input:focus::placeholder { color:#94a3b8; }
 </style>
 </head>
 <body class="bg-canvas text-ink min-h-screen">
@@ -93,6 +114,10 @@ tailwind.config = {
     </form>
     <div id="error-banner" class="hidden mt-3 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3"></div>
     <div id="search-result" class="hidden mt-3 text-sm bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-3"></div>
+    <div id="ai-note" class="hidden mt-3 text-sm bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-lg px-4 py-3 flex items-start gap-2">
+      <svg class="w-4 h-4 mt-0.5 shrink-0 text-indigo-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2m0-12.8-2.2 2.2M7.8 16.2l-2.2 2.2"/></svg>
+      <span id="ai-note-text"></span>
+    </div>
   </section>
 
   <!-- PITCH SUGGESTIONS -->
@@ -120,6 +145,12 @@ tailwind.config = {
 
   <!-- CONTROLS -->
   <section class="flex flex-wrap items-end gap-3">
+    <div id="batch-bar" class="hidden w-full sm:w-auto mb-auto">
+      <div class="inline-flex rounded-xl bg-slate-200/70 p-1 text-xs font-bold">
+        <button id="tab-latest" onclick="setView('latest')" class="cursor-pointer px-3 py-1.5 rounded-lg transition-colors duration-200">Latest search</button>
+        <button id="tab-all" onclick="setView('all')" class="cursor-pointer px-3 py-1.5 rounded-lg transition-colors duration-200">All saved</button>
+      </div>
+    </div>
     <div>
       <label for="service-filter" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">Service / Type</label>
       <select id="service-filter" onchange="loadLeads()" class="rounded-lg border border-gray-300 px-3 py-2 bg-white cursor-pointer min-w-[180px] focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200">
@@ -245,6 +276,16 @@ tailwind.config = {
 <script>
 const $ = (id) => document.getElementById(id);
 let leadsCache = [];
+let leadView = 'all';          // 'latest' | 'all'
+let lastBatchId = null;
+
+function setView(v){
+  leadView = v;
+  const on = 'bg-white shadow text-primary', off = 'text-secondary hover:text-primary';
+  $('tab-latest').className = `cursor-pointer px-3 py-1.5 rounded-lg transition-colors duration-200 ${v==='latest'?on:off}`;
+  $('tab-all').className = `cursor-pointer px-3 py-1.5 rounded-lg transition-colors duration-200 ${v==='all'?on:off}`;
+  loadLeads();
+}
 
 function showToast(msg){ $('toast-msg').textContent = msg; $('toast').classList.remove('hidden'); setTimeout(()=>$('toast').classList.add('hidden'),1800); }
 function openSetup(){ $('setup-modal').classList.remove('hidden'); }
@@ -293,6 +334,19 @@ $('search-form').addEventListener('submit', async (e)=>{
     let msg = `Found ${data.found} ${srcLabel} — saved ${data.new_leads_saved} new leads (${data.already_in_db} already in database).`;
     if (data.note) msg += ' Tip: ' + data.note;
     $('search-result').textContent = msg;
+
+    // AI understanding banner
+    if (data.understood){
+      lastBatchId = data.batch_id || null;
+      let ai = `AI understood: “${data.understood.type}” in “${data.understood.location}”`;
+      if (data.related_used && data.related_used.length)
+        ai += ` · also searched related: ${data.related_used.join(', ')}`;
+      $('ai-note-text').textContent = ai;
+      $('ai-note').classList.remove('hidden');
+      leadView = 'latest';
+      setView('latest');
+      $('batch-bar').classList.remove('hidden');
+    }
     await refreshAll();
   }catch(err){
     $('error-banner').classList.remove('hidden');
@@ -346,8 +400,9 @@ async function loadServices(){
 async function loadLeads(){
   const sort = $('sort-by').value;
   const service = encodeURIComponent($('service-filter').value);
+  const batchParam = leadView === 'latest' && lastBatchId ? `&batch=${lastBatchId}` : '';
   try{
-    const data = await fetchJSON(`/api/leads?sort=${sort}&service=${service}`);
+    const data = await fetchJSON(`/api/leads?sort=${sort}&service=${service}${batchParam}`);
     leadsCache = data.leads;
   }catch(e){
     leadsCache = [];
