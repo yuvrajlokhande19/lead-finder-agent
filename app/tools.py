@@ -22,7 +22,139 @@ DB_PATH = ROOT_DIR / "leads.db"
 
 PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OSM_USER_AGENT = "LeadFinderAgent/0.1 (local web-design prospecting tool)"
+
+# Maps common business-type words to OpenStreetMap tag pairs for Overpass queries
+OSM_TAG_MAP: list[tuple[tuple[str, ...], tuple[str, str]]] = [
+    (("dental", "dentist"), ("amenity", "dentist")),
+    (("clinic", "doctor", "physician"), ("amenity", "doctors")),
+    (("clinic",), ("amenity", "clinic")),
+    (("hospital",), ("amenity", "hospital")),
+    (("pharmacy", "chemist", "medical store"), ("amenity", "pharmacy")),
+    (("gym", "fitness"), ("leisure", "fitness_centre")),
+    (("gym", "sports"), ("leisure", "sports_centre")),
+    (("yoga",), ("leisure", "fitness_centre")),
+    (("cafe", "coffee", "caf\u00e9"), ("amenity", "cafe")),
+    (("restaurant", "food", "dine"), ("amenity", "restaurant")),
+    (("bakery",), ("shop", "bakery")),
+    (("bar", "pub"), ("amenity", "bar")),
+    (("hotel",), ("tourism", "hotel")),
+    (("guest house", "guesthouse", "lodge"), ("tourism", "guest_house")),
+    (("school",), ("amenity", "school")),
+    (("college", "institute", "university", "coaching"), ("amenity", "college")),
+    (("coaching", "tution", "tuition"), ("amenity", "prep_school")),
+    (("bank",), ("amenity", "bank")),
+    (("atm",), ("amenity", "atm")),
+    (("salon", "saloon", "haircut", "beauty", "parlour"), ("shop", "hairdresser")),
+    (("beauty", "spa"), ("leisure", "spa")),
+    (("supermarket", "grocery", "kirana"), ("shop", "supermarket")),
+    (("medical", "lab", "diagnostic"), ("healthcare", "laboratory")),
+    (("petrol", "fuel", "gas station"), ("amenity", "fuel")),
+    (("travel", "agency"), ("shop", "travel_agency")),
+    (("insurance",), ("office", "insurance")),
+    (("accountant", "chartered", "ca firm", "tax"), ("office", "accountant")),
+    (("lawyer", "advocate", "legal", "law firm"), ("office", "lawyer")),
+    (("estate", "property", "real estate"), ("office", "estate_agent")),
+    (("it company", "software", "tech"), ("office", "it")),
+]
+
+
+def _osm_tags_for(business_type: str) -> list[tuple[str, str]]:
+    bt = (business_type or "").lower()
+    pairs: list[tuple[str, str]] = []
+    for keys, tag in OSM_TAG_MAP:
+        if any(k in bt for k in keys) and tag not in pairs:
+            pairs.append(tag)
+    return pairs
+
+
+def _nominatim_bbox(location: str) -> list[str] | None:
+    """Geocode a location string to an OSM bounding box [s, n, w, e]."""
+    resp = requests.get(
+        NOMINATIM_GEOCODE_URL,
+        params={"q": location, "format": "jsonv2", "limit": 1},
+        headers={"User-Agent": OSM_USER_AGENT},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data[0]["boundingbox"] if data else None
+
+
+def _search_overpass(business_type: str, location: str, max_results: int) -> list[dict[str, Any]]:
+    """Structured POI search via the free Overpass API (no key needed).
+
+    Much better business coverage than plain Nominatim text search because it
+    queries OSM's tagged amenity/shop/leisure/office data directly.
+    """
+    bbox = _nominatim_bbox(location)
+    if not bbox:
+        return []
+    s, n, w, e = bbox
+
+    tag_pairs = _osm_tags_for(business_type)
+    if not tag_pairs:
+        return []  # caller falls back to Nominatim text search
+
+    union = "\n".join(
+        f'  node["{k}"="{v}"]({s},{w},{n},{e});\n'
+        f'  way["{k}"="{v}"]({s},{w},{n},{e});'
+        for k, v in tag_pairs[:6]
+    )
+    query = f"[out:json][timeout:30];\n(\n{union}\n);\nout center tags {min(max_results + 20, 80)};"
+
+    resp = requests.post(
+        OVERPASS_URL,
+        data={"data": query},
+        headers={"User-Agent": OSM_USER_AGENT},
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for el in resp.json().get("elements", []):
+        tags = el.get("tags") or {}
+        name = (tags.get("name") or "").strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+
+        street = " ".join(
+            x for x in (
+                tags.get("addr:housenumber"),
+                tags.get("addr:street"),
+            ) if x
+        )
+        city_bits = ", ".join(
+            x for x in (
+                tags.get("addr:suburb") or tags.get("addr:neighbourhood"),
+                tags.get("addr:city") or tags.get("addr:town") or tags.get("addr:village"),
+                tags.get("addr:state"),
+            ) if x
+        )
+        address = ", ".join(x for x in (street, city_bits) if x) or f"{name}, {location}"
+
+        btype = tags.get("amenity") or tags.get("shop") or tags.get("leisure") \
+            or tags.get("office") or tags.get("tourism") or tags.get("healthcare") \
+            or business_type
+
+        results.append({
+            "place_id": f"osm_{el.get('type', 'n')}_{el.get('id')}",
+            "name": name,
+            "business_type": str(btype).replace("_", " ").title(),
+            "address": address,
+            "phone": tags.get("phone") or tags.get("contact:phone") or tags.get("mobile"),
+            "website": tags.get("website") or tags.get("contact:website"),
+            "rating": None,
+            "reviews": None,
+            "maps_uri": None,
+        })
+        if len(results) >= max_results:
+            break
+    return results
 
 PLACES_FIELD_MASK = (
     "places.id,places.displayName,places.formattedAddress,"
@@ -173,14 +305,16 @@ def _search_osm(business_type: str, location: str, max_results: int) -> list[dic
 def search_businesses(business_type: str, location: str, max_results: int = 20) -> dict[str, Any]:
     """Search for a business type in a location and store new leads.
 
-    Uses Google Places API when a key is configured in .env; otherwise falls
-    back to the free OpenStreetMap Nominatim service (no key needed).
+    Uses Google Places API when a key is configured in .env; automatically
+    falls back to the free OpenStreetMap Nominatim service if the key is
+    missing OR rejected (401/403), so search never breaks.
     """
     api_key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
-    use_google = bool(api_key) and "PASTE" not in api_key.upper()
+    use_google = bool(api_key) and len(api_key) > 10
 
     normalized: list[dict[str, Any]] = []
     source = "google_places"
+    google_note = ""
 
     if use_google:
         body = {
@@ -197,44 +331,53 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
                 PLACES_TEXT_SEARCH_URL, json=body, headers=headers, timeout=30
             )
             resp.raise_for_status()
+            for p in resp.json().get("places", [])[:max_results]:
+                if not p.get("id"):
+                    continue
+                normalized.append({
+                    "place_id": p["id"],
+                    "name": p.get("displayName", {}).get("text", "Unknown"),
+                    "business_type": p.get("primaryTypeDisplayName", {}).get("text", business_type),
+                    "address": p.get("formattedAddress"),
+                    "phone": p.get("nationalPhoneNumber"),
+                    "website": p.get("websiteUri"),
+                    "rating": p.get("rating"),
+                    "reviews": p.get("userRatingCount"),
+                    "maps_uri": p.get("googleMapsUri"),
+                })
         except requests.RequestException as exc:
+            code = getattr(getattr(exc, "response", None), "status_code", None)
             detail = ""
             try:
                 detail = resp.json().get("error", {}).get("message", "")
             except Exception:
                 pass
-            return {"status": "error", "message": f"Places API failed: {exc} {detail}"}
-
-        for p in resp.json().get("places", [])[:max_results]:
-            if not p.get("id"):
-                continue
-            normalized.append({
-                "place_id": p["id"],
-                "name": p.get("displayName", {}).get("text", "Unknown"),
-                "business_type": p.get("primaryTypeDisplayName", {}).get("text", business_type),
-                "address": p.get("formattedAddress"),
-                "phone": p.get("nationalPhoneNumber"),
-                "website": p.get("websiteUri"),
-                "rating": p.get("rating"),
-                "reviews": p.get("userRatingCount"),
-                "maps_uri": p.get("googleMapsUri"),
-            })
+            if code in (401, 403):
+                google_note = (
+                    f"Google rejected the API key ({code}). "
+                    "Used free OpenStreetMap instead \u2014 get a valid key at "
+                    "console.cloud.google.com (keys start with 'AIza')."
+                )
+            elif code == 400 and "API key not valid" in detail:
+                google_note = (
+                    f"Invalid API key. Used free OpenStreetMap instead. ({detail[:140]})"
+                )
+            else:
+                return {"status": "error", "message": f"Places API failed: {exc} {detail}"}
     else:
+        google_note = "No Google key configured — using free OpenStreetMap."
+
+    if not normalized:
         source = "openstreetmap"
         try:
-            normalized = _search_osm(business_type, location, max_results)
+            normalized = _search_overpass(business_type, location, max_results)
+            if not normalized:
+                normalized = _search_osm(business_type, location, max_results)
         except Exception as exc:
-            return {"status": "error", "message": f"OpenStreetMap search failed: {exc}"}
-        if not normalized:
-            return {
-                "status": "ok",
-                "source": source,
-                "found": 0,
-                "new_leads_saved": 0,
-                "already_in_db": 0,
-                "note": "No OpenStreetMap results. Add a Google Places API key in .env for much better coverage.",
-                "leads": [],
-            }
+            msg = f"OpenStreetMap search failed: {exc}"
+            if google_note:
+                msg += f" | {google_note}"
+            return {"status": "error", "message": msg}
 
     saved, skipped = [], 0
     with _connect() as conn:
@@ -291,7 +434,8 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
     }
     if source == "openstreetmap":
         result["note"] = (
-            "Searched via free OpenStreetMap (phones/ratings often missing). "
+            google_note
+            or "Searched via free OpenStreetMap (phones/ratings often missing). "
             "Add a Google Places API key to .env for richer data."
         )
     return result
