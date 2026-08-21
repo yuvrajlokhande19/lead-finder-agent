@@ -17,12 +17,14 @@ from pydantic import BaseModel
 
 from app.tools import (
     analyze_lead_pipeline,
+    chat_with_ai,
     delete_lead,
     get_all_leads,
     get_lead,
     get_pitch_summary,
     get_service_types,
     get_llm_provider,
+    quick_enrich,
     search_businesses,
 )
 
@@ -108,17 +110,30 @@ def api_lead_delete(lead_id: int) -> dict:
     return {"status": "ok"}
 
 
-@app.post("/api/leads/{lead_id}/analyze")
-def api_lead_analyze(lead_id: int) -> dict:
+@app.post("/api/leads/{lead_id}/enrich")
+def api_lead_enrich(lead_id: int) -> dict:
+    """Fast contact enrichment (directories, phones, emails, related sites)."""
     if get_lead(lead_id) is None:
         raise HTTPException(status_code=404, detail="Lead not found")
     try:
-        return analyze_lead_pipeline(lead_id)
+        return quick_enrich(lead_id)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {exc}. Is Ollama running with gemma4?",
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"Enrichment failed: {exc}") from exc
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+@app.post("/api/chat")
+def api_chat(req: ChatRequest) -> dict:
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Empty message")
+    try:
+        return chat_with_ai(req.message.strip(), req.history)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
 
 
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")

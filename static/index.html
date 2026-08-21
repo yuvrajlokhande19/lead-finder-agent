@@ -169,7 +169,7 @@ tailwind.config = {
     </div>
   </section>
 
-  <footer class="text-center text-xs text-slate-400 pb-8">Lead Finder · local Ollama gemma4 · Places API · DuckDuckGo enrichment</footer>
+  <footer class="text-center text-xs text-slate-400 pb-8">Lead Finder · <span id="footer-brain">AI</span> brain · Places/Overpass search · DDG enrichment</footer>
 </main>
 
 <!-- DETAIL MODAL -->
@@ -193,6 +193,44 @@ tailwind.config = {
       <li>Ollama must be running locally with gemma4 pulled: <code class="bg-slate-100 px-1 rounded">ollama run gemma4</code></li>
     </ol>
     <button onclick="closeSetup()" class="cursor-pointer bg-cta hover:bg-sky-800 text-white font-semibold px-4 py-2 rounded-lg transition-colors duration-200">Got it</button>
+  </div>
+</div>
+
+<!-- CHAT FAB -->
+<button id="chat-fab" onclick="openChat()" class="cursor-pointer fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-cta hover:bg-sky-800 text-white shadow-lg flex items-center justify-center transition-colors duration-200" title="AI Assistant">
+  <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+</button>
+
+<!-- CHAT PANEL -->
+<div id="chat-panel" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-primary/50 backdrop-blur-sm" onclick="closeChat()"></div>
+  <div class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] bg-white shadow-2xl flex flex-col">
+    <div class="bg-primary text-white px-4 py-3.5 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2.5">
+        <span class="w-8 h-8 rounded-lg bg-cta flex items-center justify-center">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </span>
+        <div>
+          <p class="font-bold text-sm leading-tight">AI Analyst</p>
+          <p class="text-[11px] text-slate-400">Knows all your leads · fixes typos · drafts emails</p>
+        </div>
+      </div>
+      <button onclick="closeChat()" class="cursor-pointer p-2 rounded-lg hover:bg-white/10 transition-colors duration-200">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+    <div id="chat-suggestions" class="px-4 pb-2 flex flex-wrap gap-2 shrink-0">
+      <button onclick="quickAsk('Which businesses should I pitch first and why?')" class="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 text-secondary px-3 py-1.5 rounded-full transition-colors duration-200">Best pitch targets?</button>
+      <button onclick="quickAsk('Summarize my leads by city and type')" class="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 text-secondary px-3 py-1.5 rounded-full transition-colors duration-200">Summarize leads</button>
+      <button onclick="quickAsk('Write an outreach email for my highest scoring lead')" class="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 text-secondary px-3 py-1.5 rounded-full transition-colors duration-200">Draft top email</button>
+    </div>
+    <form id="chat-form" class="p-3 border-t border-gray-200 flex gap-2 shrink-0">
+      <input id="chat-input" autocomplete="off" placeholder="e.g. best dental clinc in jaipr to pitch?" class="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200"/>
+      <button type="submit" class="cursor-pointer bg-cta hover:bg-sky-800 text-white font-bold px-4 rounded-lg transition-colors duration-200">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+      </button>
+    </form>
   </div>
 </div>
 
@@ -334,26 +372,27 @@ function renderLeads(){
       <td class="px-4 py-3">${siteBadge(l.website)}</td>
       <td class="px-4 py-3 hidden md:table-cell text-secondary">${l.rating?`${l.rating} ★`:'—'}<span class="text-xs text-slate-400"> (${l.reviews??0})</span></td>
       <td class="px-4 py-3 text-right" onclick="event.stopPropagation()">
-        ${l.analyzed
-          ? `<button onclick="openDetail(${l.id})" class="cursor-pointer text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors duration-200">Ready</button>`
-          : `<button onclick="analyzeLead(event,${l.id},this)" class="cursor-pointer text-xs font-bold text-cta border border-cta/30 bg-sky-50 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors duration-200">Analyze</button>`}
+        <button onclick="enrichLead(event,${l.id},this)" class="cursor-pointer inline-flex items-center gap-1 text-xs font-bold text-cta border border-cta/30 bg-sky-50 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors duration-200">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Contacts
+        </button>
       </td>
     </tr>`).join('');
 }
 
-async function analyzeLead(ev, id, btn){
+async function enrichLead(ev, id, btn){
   ev.stopPropagation();
-  const old = btn.textContent;
+  const old = btn.innerHTML;
   btn.innerHTML = '<span class="spinner spinner-dark"></span>';
   btn.classList.add('pointer-events-none');
   try{
-    await fetchJSON(`/api/leads/${id}/analyze`, {method:'POST'});
-    showToast('Analysis ready');
-    await Promise.all([loadLeads(), loadSuggestions(), loadServices()]);
+    await fetchJSON(`/api/leads/${id}/enrich`, {method:'POST'});
+    showToast('Contacts found');
     openDetail(id);
   }catch(err){
     showToast('Failed: '+err.message.slice(0,60));
-    btn.textContent = old;
+  }finally{
+    btn.innerHTML = old;
     btn.classList.remove('pointer-events-none');
   }
 }
@@ -376,22 +415,72 @@ async function openDetail(id){
   try{ reasons = JSON.parse(lead.score_reasons||'[]'); }catch(e){}
 
   const enr = lead.enrichment || {};
+  const isQuick = enr.kind === 'quick';
   const findings = Array.isArray(enr.results) ? enr.results : [];
-  const analyzedBlock = lead.analyzed ? `
+  const phones = isQuick ? (enr.phones || []) : [];
+  const emails = isQuick ? (enr.emails || []) : [];
+  const directories = isQuick ? (enr.directories || []) : [];
+  const socials = isQuick ? (enr.socials || []) : [];
+  const related = isQuick ? (enr.related_sites || []) : [];
+
+  let contactsBlock = '';
+  if(isQuick){
+    contactsBlock = `
+    <div class="mt-5 space-y-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+          <p class="text-[11px] uppercase tracking-wide text-emerald-700 font-bold mb-1.5">Phones found</p>
+          ${phones.length ? phones.map(p=>`<a href="tel:${p}" class="block text-sm font-semibold text-emerald-800 hover:underline cursor-pointer">${escapeHtml(p)}</a>`).join('') : '<p class="text-sm text-slate-400">None in public listings</p>'}
+        </div>
+        <div class="bg-sky-50 border border-sky-100 rounded-xl p-3">
+          <p class="text-[11px] uppercase tracking-wide text-sky-700 font-bold mb-1.5">Emails found</p>
+          ${emails.length ? emails.map(e=>`<a href="mailto:${e}" class="block text-sm font-semibold text-sky-800 hover:underline break-all cursor-pointer">${escapeHtml(e)}</a>`).join('') : '<p class="text-sm text-slate-400">None public</p>'}
+        </div>
+      </div>
+      ${directories.length?`
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">Directory Listings</h4>
+        <div class="flex flex-wrap gap-2">${directories.map(d=>`
+          <a href="${d.url}" target="_blank" rel="noreferrer" class="cursor-pointer inline-flex items-center gap-1 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2.5 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors duration-200">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            ${escapeHtml((d.url.match(/https?:\/\/(www\.)?([^\/]+)/)||[])[2]||'listing')}
+          </a>`).join('')}</div>
+      </div>`:''}
+      ${socials.length?`
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">Social Profiles</h4>
+        <div class="flex flex-wrap gap-2">${socials.map(s=>`
+          <a href="${s.url}" target="_blank" rel="noreferrer" class="cursor-pointer text-xs font-semibold bg-slate-100 text-secondary border border-gray-200 px-2.5 py-1.5 rounded-lg hover:bg-slate-200 transition-colors duration-200">${escapeHtml((s.url.match(/https?:\/\/(www\.)?([^\/]+)/)||[])[2]||'link')}</a>`).join('')}</div>
+      </div>`:''}
+      ${related.length?`
+      <div>
+        <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">Related Sites & Mentions</h4>
+        <ul class="space-y-1.5">${related.map(r=>`
+          <li class="text-sm"><a href="${r.url}" target="_blank" rel="noreferrer" class="text-cta hover:underline cursor-pointer">${escapeHtml(r.title||r.url)}</a></li>`).join('')}</ul>
+      </div>`:''}
+      ${(!lead.website && enr.website_guess)?`
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+        <b>Possible official site:</b> <a href="${enr.website_guess}" target="_blank" rel="noreferrer" class="underline cursor-pointer">${escapeHtml(enr.website_guess)}</a>
+      </div>`:''}
+    </div>`;
+  } else if(findings.length){
+    contactsBlock = `
+    <div class="mt-5">
+      <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">Web Findings</h4>
+      <ul class="space-y-2">${findings.map(f=>`
+        <li class="text-sm border-l-2 border-cta/30 pl-3">
+          <a href="${f.url}" target="_blank" rel="noreferrer" class="font-semibold text-cta hover:underline cursor-pointer">${escapeHtml(f.title||f.url)}</a>
+          <p class="text-xs text-secondary line-clamp-2">${escapeHtml(f.snippet||'')}</p>
+        </li>`).join('')}</ul>
+    </div>`;
+  }
+
+  const legacyBlocks = (!isQuick && lead.analyzed) ? `
     <div class="mt-5 space-y-5">
       ${lead.pitch_note ? `
       <div>
         <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">AI Pitch Assessment</h4>
         <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm whitespace-pre-wrap">${escapeHtml(lead.pitch_note)}</div>
-      </div>`:''}
-      ${findings.length?`
-      <div>
-        <h4 class="text-xs font-bold uppercase tracking-wide text-secondary mb-2">Web Findings (contact clues)</h4>
-        <ul class="space-y-2">${findings.map(f=>`
-          <li class="text-sm border-l-2 border-cta/30 pl-3">
-            <a href="${f.url}" target="_blank" rel="noreferrer" class="font-semibold text-cta hover:underline cursor-pointer">${escapeHtml(f.title||f.url)}</a>
-            <p class="text-xs text-secondary line-clamp-2">${escapeHtml(f.snippet||'')}</p>
-          </li>`).join('')}</ul>
       </div>`:''}
       <div>
         <div class="flex items-center justify-between mb-2">
@@ -407,9 +496,15 @@ async function openDetail(id){
         </div>
         <pre id="email-text" class="bg-slate-900 text-slate-100 text-xs rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">${escapeHtml(lead.email_draft||'')}</pre>
       </div>
-    </div>` : `
-    <div class="mt-5 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 flex items-center justify-between gap-3">
-      <span>This lead hasn't been analyzed yet — analyze to get the UI/UX prompt, email draft & pitch assessment.</span>
+    </div>` : '';
+
+  const ctaBlock = `
+    <div class="mt-5 bg-primary rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <p class="text-sm text-slate-300">Want a design prompt or pitch email for this business? Ask the AI assistant.</p>
+      <button onclick="closeModal(); openChat('Draft a short outreach email and a UI/UX design prompt for lead #${lead.id} (${escapeHtml(lead.name)})')" class="cursor-pointer shrink-0 inline-flex items-center gap-2 bg-cta hover:bg-sky-800 text-white text-sm font-bold px-4 py-2.5 rounded-lg transition-colors duration-200">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Ask AI
+      </button>
     </div>`;
 
   $('modal-content').innerHTML = `
@@ -444,7 +539,9 @@ async function openDetail(id){
       <ul class="space-y-1 text-sm text-secondary">${reasons.map(r=>`<li class="flex gap-2"><svg class="w-4 h-4 text-cta shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>${escapeHtml(r)}</li>`).join('')}</ul>
     </div>`:''}
 
-    ${analyzedBlock}`;
+    ${contactsBlock}
+    ${legacyBlocks}
+    ${ctaBlock}`;
   $('modal').classList.remove('hidden');
   document.body.style.overflow='hidden';
 }
@@ -465,6 +562,7 @@ async function loadBrainBadge(){
     } else {
       el.textContent = `${c.model} (local)`;
     }
+    $('footer-brain').textContent = c.provider === 'gemini' ? 'Gemini cloud' : 'Local Ollama';
   }catch(e){ $('brain-badge').textContent = 'offline'; }
 }
 
@@ -473,6 +571,79 @@ document.addEventListener('keydown', (e)=>{
     e.preventDefault(); $('business-type').focus();
   }
 });
+
+let chatHistory = [];
+
+function openChat(prefill){
+  $('chat-panel').classList.remove('hidden');
+  if(!$('chat-messages').dataset.greeted){
+    addMsg('model', "Hi! I can see all your saved leads. Ask me things like:\n- **Which businesses should I pitch first?**\n- *find gyms in Pune* (I'll fix typos and start the search)\n- **Draft an email** for lead #3");
+    $('chat-messages').dataset.greeted = '1';
+  }
+  if(prefill){ $('chat-input').value = prefill; $('chat-input').focus(); }
+}
+function closeChat(){ $('chat-panel').classList.add('hidden'); }
+
+function quickAsk(q){ openChat(); $('chat-input').value = q; sendChat(); }
+
+function addMsg(role, text){
+  const wrap = document.createElement('div');
+  const isUser = role === 'user';
+  wrap.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+  const bubble = document.createElement('div');
+  bubble.className = `max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${isUser ? 'bg-cta text-white rounded-br-md' : 'bg-slate-100 text-ink rounded-bl-md'}`;
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  $('chat-messages').appendChild(wrap);
+  $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
+  return bubble;
+}
+
+function addTyping(){
+  const wrap = document.createElement('div');
+  wrap.id = 'chat-typing';
+  wrap.className = 'flex justify-start';
+  wrap.innerHTML = '<div class="bg-slate-100 rounded-2xl rounded-bl-md px-4 py-3"><span class="spinner spinner-dark"></span></div>';
+  $('chat-messages').appendChild(wrap);
+  $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
+}
+
+$('chat-form').addEventListener('submit', (e)=>{ e.preventDefault(); sendChat(); });
+
+async function sendChat(){
+  const input = $('chat-input');
+  const msg = input.value.trim();
+  if(!msg) return;
+  input.value = '';
+  addMsg('user', msg);
+  addTyping();
+  try{
+    const res = await fetchJSON('/api/chat', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message: msg, history: chatHistory.slice(-6)})
+    });
+    document.getElementById('chat-typing')?.remove();
+    addMsg('model', res.reply || '(empty reply)');
+    chatHistory.push({role:'user', text: msg}, {role:'model', text: res.reply||''});
+    if(res.action && res.action.type === 'search'){
+      const note = document.createElement('div');
+      note.className = 'flex justify-start';
+      note.innerHTML = `<button class="cursor-pointer max-w-[85%] bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl hover:bg-emerald-100 transition-colors duration-200">Run search: ${escapeHtml(res.action.business_type)} in ${escapeHtml(res.action.location)} →</button>`;
+      note.querySelector('button').onclick = ()=>{
+        $('business-type').value = res.action.business_type;
+        $('location').value = res.action.location;
+        closeChat();
+        $('search-form').requestSubmit();
+      };
+      $('chat-messages').appendChild(note);
+      $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
+    }
+  }catch(err){
+    document.getElementById('chat-typing')?.remove();
+    addMsg('model', '⚠ ' + err.message);
+  }
+}
 
 loadBrainBadge();
 refreshAll();

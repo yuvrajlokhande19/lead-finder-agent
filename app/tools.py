@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -765,8 +766,243 @@ def delete_lead(lead_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Full pipeline used by both the agent tool and the web server
+# Fast contact enrichment (no LLM — regex extraction, runs in seconds)
 # ---------------------------------------------------------------------------
+
+PHONE_RE = re.compile(
+    r"(?:\+?91[\-\s]?)?[6-9]\d{9}"
+    r"|\+?91[\-\s]\d{5}[\-\s]\d{5}"
+    r"|0\d{2,4}[\-\s]?\d{6,8}"
+)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+DIRECTORY_DOMAINS = (
+    "justdial.com", "indiamart.com", "sulekha.com", "tradeindia.com",
+    "yellowpages", "practo.com", "lybrate.com", "magicpin", "nearbuy",
+    "olx.in", "quikr.com",
+)
+SOCIAL_DOMAINS = ("facebook.com", "linkedin.com", "instagram.com", "twitter.com", "x.com")
+
+
+def _classify_url(url: str) -> str:
+    u = url.lower()
+    if any(d in u for d in DIRECTORY_DOMAINS):
+        return "directory"
+    if any(d in u for d in SOCIAL_DOMAINS):
+        return "social"
+    return "other"
+
+
+def quick_enrich(lead_id: int) -> dict[str, Any]:
+    """Fast, LLM-free enrichment: directory listings, phones, emails,
+    socials and an official-website guess for one lead. Runs in seconds."""
+    lead = get_lead(lead_id)
+    if lead is None:
+        return {"status": "error", "message": f"Lead {lead_id} not found"}
+
+    name = lead["name"]
+    loc = lead.get("search_location") or ""
+    queries = [
+        f'"{name}" {loc} contact phone',
+        f'"{name}" {loc} justdial OR indiamart OR sulekha',
+        f'"{name}" {loc} official website',
+    ]
+
+    sources: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    phones: set[str] = set()
+    emails: set[str] = set()
+
+    try:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            for q in queries:
+                try:
+                    rows = list(ddgs.text(q, max_results=6))
+                except Exception:
+                    continue
+                for r in rows:
+                    url = r.get("href") or r.get("url") or ""
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    text_blob = f"{r.get('title') or ''} {r.get('body') or ''}"
+                    for m in PHONE_RE.findall(text_blob):
+                        digits = re.sub(r"\D", "", m)
+                        if 10 <= len(digits) <= 13:
+                            phones.add(m.strip())
+                    for m in EMAIL_RE.findall(text_blob):
+                        if not any(x in m.lower() for x in ("example.", ".png", ".jpg")):
+                            emails.add(m.lower())
+                    kind = _classify_url(url)
+                    sources.append(
+                        {
+                            "kind": kind,
+                            "title": (r.get("title") or "")[:120],
+                            "url": url,
+                            "snippet": (r.get("body") or "")[:220],
+                        }
+                    )
+    except Exception as exc:
+        return {"status": "error", "message": f"Enrichment search failed: {exc}"}
+
+    directories = [s for s in sources if s["kind"] == "directory"]
+    socials = [s for s in sources if s["kind"] == "social"]
+    others = [s for s in sources if s["kind"] == "other"]
+
+    # Official website guess: first 'other' domain whose domain shares tokens with the name
+    name_tokens = {t for t in re.findall(r"[a-z0-9]{3,}", name.lower())}
+    website_guess = None
+    if not lead.get("website"):
+        for s in others:
+            try:
+                host = re.sub(r"^www\.", "", s["url"].split("/")[2])
+            except Exception:
+                continue
+            host_tokens = set(re.findall(r"[a-z0-9]{3,}", host))
+            if host_tokens & name_tokens:
+                website_guess = s["url"]
+                break
+        if website_guess is None and others:
+            website_guess = others[0]["url"]
+
+    enrichment = {
+        "kind": "quick",
+        "phones": sorted(phones)[:4],
+        "emails": sorted(emails)[:3],
+        "directories": directories[:5],
+        "socials": socials[:4],
+        "related_sites": others[:6],
+        "website_guess": website_guess,
+        "sources_count": len(sources),
+    }
+
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE leads
+               SET enrichment_json = ?, analyzed = 1,
+                   phone = COALESCE(NULLIF(phone,''), ?),
+                   website = COALESCE(website, ?)
+               WHERE id = ?""",
+            (
+                json.dumps(enrichment),
+                (sorted(phones)[0] if phones else None),
+                website_guess,
+                lead_id,
+            ),
+        )
+
+    return {"status": "ok", "lead_id": lead_id, "enrichment": enrichment}
+
+
+def build_leads_context(limit: int = 200) -> str:
+    """Compact JSON of all leads to inject into the chat prompt."""
+    leads = get_all_leads(sort="score")[:limit]
+    compact = [
+        {
+            "id": l["id"],
+            "name": l["name"],
+            "type": l["business_type"],
+            "city": l["search_location"],
+            "tier": l["tier"],
+            "score": l["score"],
+            "rating": l["rating"],
+            "reviews": l["reviews"],
+            "website": bool(l["website"]),
+            "phone": l["phone"],
+            "analyzed": bool(l["analyzed"]),
+        }
+        for l in leads
+    ]
+    return json.dumps(compact, ensure_ascii=False)
+
+
+CHAT_SYSTEM_PROMPT = """You are the AI analyst inside a business lead-generation dashboard \
+for a web design agency. You are given the full lead database as JSON.
+
+Your jobs:
+1. FIX SPELLING: users often mistype searches (e.g. "dental clinc in jaipr" means \
+"dental clinic in Jaipur"). Always understand the intent.
+2. ANALYZE: answer questions about the businesses using ONLY the provided data — \
+rank best pitch targets, explain scores, compare by city tier / reviews / missing websites.
+3. RECOMMEND: suggest which businesses to contact first and why.
+4. DRAFT: when asked, write short outreach emails or UI/UX design prompts for a \
+specific lead (use its id/name/type/city).
+5. SEARCH INTENT: if the user clearly wants to FIND new businesses \
+(e.g. "find cafes in Pune"), reply briefly, then end your message with exactly this line:
+ACTION: search | <corrected business type> | <corrected location>
+
+Rules: be concise. Never invent data that is not in the JSON — say what is missing. \
+Use markdown-lite (bold, dashes) for readability."""
+
+
+def chat_with_ai(message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    """One fast Gemini call with the whole lead database as context."""
+    context = build_leads_context()
+    user_block = (
+        f"LEAD DATABASE ({json.dumps({'count': 'see below'})}):\n{context}\n\n"
+        f"USER MESSAGE:\n{message}"
+    )
+    contents = []
+    for h in (history or [])[-6:]:
+        role = "user" if h.get("role") == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
+    contents.append({"role": "user", "parts": [{"text": user_block}]})
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    provider = get_llm_provider()
+
+    if provider == "gemini" and api_key:
+        models = [os.environ.get("GEMINI_MODEL") or GEMINI_MODEL_CHAIN[0]] + GEMINI_MODEL_CHAIN
+        seen: list[str] = []
+        for m in models:
+            if m not in seen:
+                seen.append(m)
+        last_err: Exception | None = None
+        payload: dict[str, Any] = {
+            "systemInstruction": {"parts": [{"text": CHAT_SYSTEM_PROMPT}]},
+            "contents": contents,
+        }
+        for model in seen:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent"
+            )
+            for attempt in range(2):
+                try:
+                    resp = requests.post(
+                        url, params={"key": api_key}, json=payload, timeout=120
+                    )
+                    resp.raise_for_status()
+                    reply = resp.json()["candidates"][0]["content"]["parts"][0][
+                        "text"
+                    ].strip()
+                    action = None
+                    m = re.search(
+                        r"ACTION:\s*search\s*\|\s*([^|]+)\|\s*(.+)", reply
+                    )
+                    if m:
+                        action = {
+                            "type": "search",
+                            "business_type": m.group(1).strip(),
+                            "location": m.group(2).strip(),
+                        }
+                        reply = reply[: m.start()].rstrip()
+                    return {"status": "ok", "reply": reply, "action": action}
+                except requests.RequestException as exc:
+                    last_err = exc
+                    code = getattr(getattr(exc, "response", None), "status_code", None)
+                    if code not in _RETRYABLE_CODES:
+                        raise RuntimeError(f"Gemini error: {exc}") from exc
+                    time.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"All Gemini models failed. Last error: {last_err}")
+
+    # Local fallback
+    prompt = CHAT_SYSTEM_PROMPT + "\n\n" + user_block
+    return {"status": "ok", "reply": generate_with_ollama(prompt), "action": None}
+
+
+
 
 def analyze_lead_pipeline(lead_id: int) -> dict[str, Any]:
     lead = get_lead(lead_id)

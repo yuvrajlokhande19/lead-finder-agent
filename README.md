@@ -94,14 +94,18 @@ Open **http://127.0.0.1:8080** 🎉
 
 ## Using the Dashboard
 
-1. **Search** — enter a business type (`dental clinic`, `gym`, `cafe`) + location (`Jaipur`, `Indore`, `Andheri West`)
+1. **Search** — enter a business type (`dental clinic`, `gym`, `cafe`) + location (`Jaipur`, `Indore`). Typos are fine — the AI chat fixes them.
 2. **Review scores** — each lead gets a color-coded chance badge:
    - 🟢 **70–100 High** — pitch these first
    - 🟡 **45–69 Medium**
    - ⚪ **<45 Low**
 3. **Pitch Suggestions panel** — see how many businesses you can pitch overall + top cards ranked by opportunity
-4. **Click a lead → Analyze** — runs web enrichment + generates the UI/UX prompt, email draft, and pitch assessment
-5. **Copy & act** — copy the email into Gmail, paste the prompt into your favorite AI site-builder to mock up a demo
+4. **Click "Contacts"** on any lead — in ~10 seconds it finds directory listings (JustDial, IndiaMART, Sulekha…), extracts public phones/emails, social profiles, related sites and guesses the official website
+5. **AI Analyst chat** (bottom-right bubble) — knows your whole database:
+   - *"which dental clinc shud i pitch first?"* → ranked recommendation (typos fixed)
+   - *"find gyms in mumbai"* → shows a one-click Run Search button
+   - *"draft an email for lead #3"* → instant outreach draft
+   - *"summarize my leads by city"* → instant analysis
 
 ### How the score works
 
@@ -136,8 +140,9 @@ Try: *"find dental clinics in Jaipur"* → *"analyze lead 3"*
 | `/api/leads` | GET | List leads (`?sort=score\|rating\|reviews\|name&service=Dentist`) |
 | `/api/services` | GET | Distinct business types (for filters) |
 | `/api/suggestions` | GET | Pitch summary + top suggestions (`?min_score=45&limit=8`) |
-| `/api/leads/{id}` | GET | Full lead detail incl. generated assets |
-| `/api/leads/{id}/analyze` | POST | Enrich + generate prompt/email/pitch-note |
+| `/api/leads/{id}` | GET | Full lead detail incl. enrichment |
+| `/api/leads/{id}/enrich` | POST | Fast contact finder: directories, phones, emails, related sites (~10 s) |
+| `/api/chat` | POST | AI analyst chat — `{message, history}` → `{reply, action?}`; may return a `search` action |
 | `/api/leads/{id}` | DELETE | Remove a lead |
 
 ## Project Structure
