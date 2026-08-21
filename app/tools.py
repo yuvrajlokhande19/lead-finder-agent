@@ -67,6 +67,48 @@ OSM_TAG_MAP: list[tuple[tuple[str, ...], tuple[str, str]]] = [
 ]
 
 
+def parse_search_query(query: str) -> dict[str, Any] | None:
+    """Parse a Google-style query ('clinic in wardha') into type + location."""
+    q = (query or "").strip()
+    if not q:
+        return None
+
+    # Fast path: "<type> in|near|at|around <place>"
+    parts = re.split(r"\s+(?:in|near|at|around)\s+", q, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+        return {
+            "business_type": parts[0].strip(" \"'"),
+            "location": parts[1].strip(" \"'"),
+            "via": "pattern",
+        }
+
+    # Comma path: "wardha, clinic"
+    if "," in q:
+        a, b = q.split(",", 1)
+        a, b = a.strip(), b.strip()
+        if a and b:
+            return {"business_type": b, "location": a, "via": "comma"}
+
+    # AI path for anything else ("wardha clinics", misspellings…)
+    try:
+        raw = generate_text(
+            f'Split this search into a business category and a city/area. '
+            f'Fix spelling. Reply ONLY JSON: {{"business_type":"...","location":"..."}}\n'
+            f'SEARCH: "{q}"'
+        )
+        m = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if m:
+            d = json.loads(m.group(0))
+            bt, loc = str(d.get("business_type", "")).strip(), str(d.get("location", "")).strip()
+            if bt and loc:
+                return {"business_type": bt, "location": loc, "via": "ai"}
+    except Exception:
+        pass
+
+    # Last resort: whole string is the type; no location found
+    return {"business_type": q, "location": "", "via": "none"}
+
+
 def _osm_tags_for(business_type: str) -> list[tuple[str, str]]:
     bt = (business_type or "").lower()
     pairs: list[tuple[str, str]] = []
@@ -476,9 +518,24 @@ def search_businesses(business_type: str, location: str, max_results: int = 20) 
                     eff_type, eff_loc, max_results, extra_tags=related_pairs
                 )
             except Exception:
-                normalized = []  # Overpass down → fall through to Nominatim
-            if not normalized:
-                normalized = _search_osm(eff_type, eff_loc, max_results)
+                normalized = []  # Overpass down → Nominatim still runs below
+
+            # Always merge Nominatim results too — maximizes total businesses found
+            try:
+                nom = _search_osm(eff_type, eff_loc, max_results)
+            except Exception:
+                nom = []
+            seen_keys = {
+                n["place_id"] for n in normalized
+            } | {n["name"].lower()[:40] for n in normalized}
+            for item in nom:
+                key_id = item["place_id"]
+                key_name = item["name"].lower()[:40]
+                if key_id in seen_keys or key_name in seen_keys:
+                    continue
+                seen_keys.update((key_id, key_name))
+                normalized.append(item)
+            normalized = normalized[:max_results]
         except Exception as exc:
             msg = f"OpenStreetMap search failed: {exc}"
             if google_note:

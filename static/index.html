@@ -24,59 +24,49 @@ tailwind.config = {
 }
 </script>
 <style>
-  body { font-family: 'Plus Jakarta Sans', sans-serif; }
-  .spinner { border: 3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:9999px; width:1rem; height:1rem; animation:spin .7s linear infinite; display:inline-block;}
-  .spinner-dark { border: 3px solid rgba(15,23,42,.15); border-top-color:#0369A1; }
-  @keyframes spin { to { transform: rotate(360deg);} }
-  @keyframes fadeUp { from { opacity:0; transform: translateY(10px);} to { opacity:1; transform:none;} }
-  .fade-up { animation: fadeUp .45s cubic-bezier(.22,.68,.43,1) both; }
-  .fade-up-1{animation-delay:.05s} .fade-up-2{animation-delay:.12s} .fade-up-3{animation-delay:.2s}
-  @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important;} }
-
-  /* Glassy sticky navbar */
-  .nav-glass { backdrop-filter: blur(14px); background: rgba(15,23,42,.88); }
-  /* Hero search glow */
-  .hero-glow { position:relative; overflow:hidden; }
-  .hero-glow::before { content:''; position:absolute; inset:-40% -20% auto auto; width:340px; height:340px;
-    background: radial-gradient(circle, rgba(3,105,161,.16), transparent 65%); pointer-events:none; }
-  /* Card hover lift */
-  .lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
-  .lift:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -12px rgba(15,23,42,.25); }
-  /* Suggestion card sheen */
-  .sheen { position:relative; overflow:hidden; }
-  .sheen::after { content:''; position:absolute; top:0; left:-70%; width:50%; height:100%;
-    background: linear-gradient(100deg, transparent, rgba(255,255,255,.14), transparent);
-    transform: skewX(-18deg); transition:left .55s ease; pointer-events:none; }
-  .sheen:hover::after { left:130%; }
-  button:active:not(:disabled) { transform: scale(.97); }
-  input:focus::placeholder { color:#94a3b8; }
+  :root { --neo-bg:#E9EEF6; --neo-dark:#c3cddb; --neo-light:#ffffff; }
+  body { font-family:'Plus Jakarta Sans',sans-serif; background:var(--neo-bg); color:#1e293b; }
+  .neo { background:var(--neo-bg); box-shadow:8px 8px 18px var(--neo-dark), -8px -8px 18px var(--neo-light); }
+  .neo-sm { background:var(--neo-bg); box-shadow:4px 4px 10px var(--neo-dark), -4px -4px 10px var(--neo-light); }
+  .neo-inset { background:var(--neo-bg); box-shadow:inset 5px 5px 10px var(--neo-dark), inset -5px -5px 10px var(--neo-light); }
+  .neo-press:active { box-shadow:inset 4px 4px 9px var(--neo-dark), inset -4px -4px 9px var(--neo-light) !important; }
+  .spinner { border:3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:9999px; width:1rem; height:1rem; animation:spin .7s linear infinite; display:inline-block;}
+  .spinner-dark { border:3px solid rgba(15,23,42,.15); border-top-color:#0369A1; }
+  @keyframes spin { to { transform:rotate(360deg);} }
+  @keyframes fadeUp { from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+  .fade-up { animation:fadeUp .45s cubic-bezier(.22,.68,.43,1) both; }
+  .fade-up-1{animation-delay:.05s}.fade-up-2{animation-delay:.12s}.fade-up-3{animation-delay:.2s}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+  .lift { transition:transform .2s ease, box-shadow .2s ease; }
+  .lift:hover { transform:translateY(-3px); box-shadow:11px 11px 22px var(--neo-dark), -11px -11px 22px var(--neo-light); }
+  button:active:not(:disabled){ transform:scale(.97); }
 </style>
 </head>
 <body class="bg-canvas text-ink min-h-screen">
 
 <!-- NAVBAR -->
-<nav class="bg-primary text-white">
-  <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+<nav class="neo sticky top-3 z-40 mx-3 sm:mx-4 rounded-2xl px-4 py-3">
+  <div class="max-w-6xl mx-auto flex items-center justify-between gap-4">
     <div class="flex items-center gap-3">
-      <span class="w-9 h-9 rounded-lg bg-cta flex items-center justify-center">
+      <span class="w-9 h-9 rounded-xl bg-gradient-to-br from-cta to-sky-500 text-white flex items-center justify-center shadow-md">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       </span>
       <div>
-        <h1 class="font-bold text-lg leading-tight">Lead Finder</h1>
-        <p class="text-slate-400 text-xs">Website prospecting · <span id="brain-badge" class="text-cta font-semibold">connecting…</span></p>
+        <h1 class="font-extrabold text-lg leading-tight text-primary">Lead Finder</h1>
+        <p class="text-slate-500 text-xs">Website prospecting · <span id="brain-badge" class="text-cta font-semibold">connecting…</span></p>
       </div>
     </div>
     <div class="flex items-center gap-2 text-sm">
-      <div class="flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5" title="Total leads">
-        <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-        <span id="stat-total" class="font-semibold">0</span>
+      <div class="neo-sm flex items-center gap-1.5 rounded-xl px-2.5 py-1.5" title="Total leads">
+        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        <span id="stat-total" class="font-bold text-primary">0</span>
       </div>
-      <div class="flex items-center gap-1.5 bg-white/10 rounded-lg px-2.5 py-1.5" title="Pitchable leads">
-        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-3L2 16"/><path d="M16 7h6v6"/></svg>
-        <span id="stat-pitchable" class="font-semibold text-emerald-400">0</span>
+      <div class="neo-sm flex items-center gap-1.5 rounded-xl px-2.5 py-1.5" title="Pitchable leads">
+        <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-3L2 16"/><path d="M16 7h6v6"/></svg>
+        <span id="stat-pitchable" class="font-bold text-emerald-600">0</span>
       </div>
-      <button onclick="openSetup()" title="Settings" class="cursor-pointer p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors duration-200">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      <button onclick="openSetup()" title="Settings" class="cursor-pointer neo-sm neo-press p-2 rounded-xl transition-all duration-200">
+        <svg class="w-4 h-4 text-secondary" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
     </div>
   </div>
@@ -85,29 +75,27 @@ tailwind.config = {
 <main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
 
   <!-- SEARCH CARD -->
-  <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-    <h2 class="font-bold text-primary mb-1 flex items-center gap-2">
-      <svg class="w-5 h-5 text-cta" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+  <section class="neo rounded-3xl p-5 sm:p-6 fade-up">
+    <h2 class="font-extrabold text-primary mb-1 flex items-center gap-2 text-lg">
+      <span class="w-7 h-7 rounded-lg bg-gradient-to-br from-cta to-sky-500 text-white flex items-center justify-center shadow">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </span>
       Find Businesses
     </h2>
-    <p class="text-sm text-secondary mb-4">Search by city, landmark or area + business type. Medium-scale businesses without websites score highest.</p>
-    <form id="search-form" class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3">
-      <div>
-        <label for="business-type" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">Business type</label>
-        <input id="business-type" required placeholder="dental clinic, gym, accounting firm…" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200"/>
+    <p class="text-sm text-slate-500 mb-4">One bar, Google-style — the AI understands typos & finds related categories too.</p>
+    <form id="search-form" class="flex flex-col md:flex-row gap-3">
+      <div class="neo-inset flex-1 flex items-center gap-3 rounded-2xl px-4 py-1">
+        <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search-input" autocomplete="off" required placeholder='Search anything… e.g. "dental clinic in Wardha"' class="w-full bg-transparent py-3 text-[15px] focus:outline-none placeholder:text-slate-400"/>
+        <button type="button" onclick="document.getElementById('search-input').value=''" title="Clear" class="cursor-pointer text-slate-400 hover:text-slate-600 transition-colors duration-200 shrink-0 hidden" id="clear-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
       </div>
-      <div>
-        <label for="location" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">City / Landmark / Area</label>
-        <input id="location" required placeholder="Jaipur, Indore, Andheri West…" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200"/>
-      </div>
-      <div>
-        <label for="max-results" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">Max</label>
-        <select id="max-results" class="rounded-lg border border-gray-300 px-3 py-2.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta">
-          <option>10</option><option selected>20</option><option>20</option>
+      <div class="flex gap-3">
+        <select id="max-results" class="neo neo-press cursor-pointer rounded-2xl px-3 text-sm font-semibold text-secondary focus:outline-none">
+          <option value="10">10</option><option value="20" selected>20</option><option value="30">30</option><option value="50">50</option>
         </select>
-      </div>
-      <div class="flex items-end">
-        <button type="submit" id="search-btn" class="cursor-pointer w-full md:w-auto inline-flex items-center justify-center gap-2 bg-cta hover:bg-sky-800 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors duration-200">
+        <button type="submit" id="search-btn" class="cursor-pointer flex-1 md:flex-none inline-flex items-center justify-center gap-2 bg-gradient-to-br from-cta to-sky-600 hover:from-sky-700 hover:to-sky-800 text-white font-bold px-7 rounded-2xl shadow-lg transition-all duration-200">
           <span class="btn-label">Search</span>
         </button>
       </div>
@@ -121,25 +109,27 @@ tailwind.config = {
   </section>
 
   <!-- PITCH SUGGESTIONS -->
-  <section class="bg-gradient-to-br from-primary to-slate-800 text-white rounded-2xl p-5 shadow-sm">
+  <section class="neo rounded-3xl p-5 sm:p-6 fade-up fade-up-1">
     <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div>
-        <h2 class="font-bold text-lg flex items-center gap-2">
-          <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-3L2 16"/><path d="M16 7h6v6"/></svg>
+        <h2 class="font-extrabold text-lg text-primary flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-emerald-500 text-white flex items-center justify-center shadow">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 7-8.5 8.5-5-3L2 16"/><path d="M16 7h6v6"/></svg>
+          </span>
           Pitch Suggestions
         </h2>
-        <p class="text-sm text-slate-300 mt-1">Best opportunities ranked by chance-to-win: no website + strong reviews + Tier&nbsp;2/3 location.</p>
+        <p class="text-sm text-slate-500 mt-1">Best opportunities ranked by chance-to-win: no website + strong reviews + Tier&nbsp;2/3 location.</p>
       </div>
       <div class="text-right">
-        <p class="text-3xl font-extrabold text-emerald-400" id="pitchable-count">–</p>
-        <p class="text-xs text-slate-300 uppercase tracking-wide">businesses you can pitch</p>
+        <p class="text-3xl font-extrabold text-emerald-600" id="pitchable-count">–</p>
+        <p class="text-xs text-slate-500 uppercase tracking-wide">businesses you can pitch</p>
       </div>
     </div>
-    <div id="suggestion-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      <div class="skeleton-card col-span-1 h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
-      <div class="skeleton-card col-span-1 h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
-      <div class="hidden sm:block skeleton-card h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
-      <div class="hidden sm:block skeleton-card h-[104px] bg-white/10 border border-white/10 rounded-xl animate-pulse"></div>
+    <div id="suggestion-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="skeleton-card col-span-1 h-[104px] neo-inset rounded-2xl animate-pulse"></div>
+      <div class="skeleton-card col-span-1 h-[104px] neo-inset rounded-2xl animate-pulse"></div>
+      <div class="hidden sm:block skeleton-card h-[104px] neo-inset rounded-2xl animate-pulse"></div>
+      <div class="hidden sm:block skeleton-card h-[104px] neo-inset rounded-2xl animate-pulse"></div>
     </div>
   </section>
 
@@ -153,13 +143,13 @@ tailwind.config = {
     </div>
     <div>
       <label for="service-filter" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">Service / Type</label>
-      <select id="service-filter" onchange="loadLeads()" class="rounded-lg border border-gray-300 px-3 py-2 bg-white cursor-pointer min-w-[180px] focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200">
+      <select id="service-filter" onchange="loadLeads()" class="neo-sm neo-press cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold text-secondary min-w-[180px] focus:outline-none">
         <option value="">All services</option>
       </select>
     </div>
     <div>
       <label for="sort-by" class="block text-xs font-semibold text-secondary uppercase tracking-wide mb-1">Sort by</label>
-      <select id="sort-by" onchange="loadLeads()" class="rounded-lg border border-gray-300 px-3 py-2 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200">
+      <select id="sort-by" onchange="loadLeads()" class="neo-sm neo-press cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold text-secondary focus:outline-none">
         <option value="score">Chance to win (score)</option>
         <option value="rating">Rating</option>
         <option value="reviews">Reviews</option>
@@ -174,11 +164,11 @@ tailwind.config = {
   </section>
 
   <!-- LEADS TABLE -->
-  <section class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+  <section class="neo rounded-3xl overflow-hidden">
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
-          <tr class="text-left text-xs uppercase tracking-wide text-secondary bg-slate-50 border-b border-gray-200">
+          <tr class="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-100/70 border-b border-slate-200/70">
             <th class="px-4 py-3 font-semibold">Chance</th>
             <th class="px-4 py-3 font-semibold">Business</th>
             <th class="px-4 py-3 font-semibold hidden md:table-cell">Type</th>
@@ -228,15 +218,15 @@ tailwind.config = {
 </div>
 
 <!-- CHAT FAB -->
-<button id="chat-fab" onclick="openChat()" class="cursor-pointer fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-cta hover:bg-sky-800 text-white shadow-lg flex items-center justify-center transition-colors duration-200" title="AI Assistant">
+<button id="chat-fab" onclick="openChat()" class="cursor-pointer fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full neo lift text-cta flex items-center justify-center transition-all duration-200" title="AI Assistant">
   <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
 </button>
 
 <!-- CHAT PANEL -->
 <div id="chat-panel" class="hidden fixed inset-0 z-50">
   <div class="absolute inset-0 bg-primary/50 backdrop-blur-sm" onclick="closeChat()"></div>
-  <div class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] bg-white shadow-2xl flex flex-col">
-    <div class="bg-primary text-white px-4 py-3.5 flex items-center justify-between shrink-0">
+  <div class="absolute right-0 top-0 bottom-0 w-full sm:w-[420px] shadow-2xl flex flex-col" style="background:var(--neo-bg)">
+    <div class="px-4 py-3.5 flex items-center justify-between shrink-0 border-b border-slate-200/70">
       <div class="flex items-center gap-2.5">
         <span class="w-8 h-8 rounded-lg bg-cta flex items-center justify-center">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -256,8 +246,8 @@ tailwind.config = {
       <button onclick="quickAsk('Summarize my leads by city and type')" class="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 text-secondary px-3 py-1.5 rounded-full transition-colors duration-200">Summarize leads</button>
       <button onclick="quickAsk('Write an outreach email for my highest scoring lead')" class="cursor-pointer text-xs bg-slate-100 hover:bg-slate-200 text-secondary px-3 py-1.5 rounded-full transition-colors duration-200">Draft top email</button>
     </div>
-    <form id="chat-form" class="p-3 border-t border-gray-200 flex gap-2 shrink-0">
-      <input id="chat-input" autocomplete="off" placeholder="e.g. best dental clinc in jaipr to pitch?" class="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cta/40 focus:border-cta transition-colors duration-200"/>
+    <form id="chat-form" class="p-3 border-t border-slate-200/70 flex gap-2 shrink-0">
+      <input id="chat-input" autocomplete="off" placeholder="e.g. best dental clinc in jaipr to pitch?" class="neo-inset flex-1 rounded-xl px-3 py-2.5 text-sm bg-transparent focus:outline-none"/>
       <button type="submit" class="cursor-pointer bg-cta hover:bg-sky-800 text-white font-bold px-4 rounded-lg transition-colors duration-200">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
       </button>
@@ -317,13 +307,12 @@ async function fetchJSON(url, opts){
 $('search-form').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const btn = $('search-btn'), label = btn.querySelector('.btn-label');
-  $('error-banner').classList.add('hidden'); $('search-result').classList.add('hidden');
+  $('error-banner').classList.add('hidden'); $('search-result').classList.add('hidden'); $('ai-note').classList.add('hidden');
   btn.disabled = true;
   label.innerHTML = '<span class="spinner mr-2 align-middle"></span>Searching…';
   try{
     const body = JSON.stringify({
-      business_type: $('business-type').value.trim(),
-      location: $('location').value.trim(),
+      query: $('search-input').value.trim(),
       max_results: parseInt($('max-results').value)||20
     });
     const data = await fetchJSON('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body});
@@ -370,18 +359,19 @@ async function loadSuggestions(){
       return;
     }
     wrap.innerHTML = s.top_suggestions.map(l=>`
-      <button onclick="openDetail(${l.id})" class="cursor-pointer text-left bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl p-3 transition-colors duration-200">
+      <button onclick="openDetail(${l.id})" class="cursor-pointer text-left neo lift rounded-2xl p-3.5 transition-all duration-200">
         <div class="flex items-center justify-between gap-2 mb-1">
-          <span class="font-bold text-sm truncate">${escapeHtml(l.name)}</span>
-          <span class="text-xs font-extrabold px-1.5 py-0.5 rounded ${l.score>=70?'bg-emerald-400/20 text-emerald-300':'bg-amber-400/20 text-amber-300'}">${l.score}</span>
+          <span class="font-bold text-sm truncate text-primary">${escapeHtml(l.name)}</span>
+          <span class="text-xs font-extrabold px-2 py-0.5 rounded-full ${l.score>=70?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}">${l.score}</span>
         </div>
-        <p class="text-xs text-slate-300 truncate">${escapeHtml(l.business_type||'')}</p>
+        <p class="text-xs text-slate-500 truncate">${escapeHtml(l.business_type||'')}</p>
         <p class="text-xs text-slate-400 truncate mt-1">${escapeHtml(l.search_location||'')}</p>
-        <p class="text-xs font-semibold ${l.website?'text-slate-400':'text-red-300'}">${l.website?'Has website':'No website — best target'}</p>
+        <p class="text-[11px] mt-2 font-bold ${l.website?'text-slate-400':'text-red-500'}">${l.website?'Has website':'No website — best target'}</p>
       </button>`).join('');
   }catch(e){
     $('suggestion-cards').innerHTML = '<p class="text-sm text-slate-400 col-span-full">Could not load suggestions.</p>';
   }
+}
 }
 
 function escapeHtml(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -623,9 +613,12 @@ async function loadBrainBadge(){
 
 document.addEventListener('keydown', (e)=>{
   if(e.key === '/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){
-    e.preventDefault(); $('business-type').focus();
+    e.preventDefault(); $('search-input').focus();
   }
 });
+
+const si = $('search-input');
+si.addEventListener('input', ()=>{ $('clear-btn').classList.toggle('hidden', !si.value); });
 
 let chatHistory = [];
 
@@ -686,8 +679,7 @@ async function sendChat(){
       note.className = 'flex justify-start';
       note.innerHTML = `<button class="cursor-pointer max-w-[85%] bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold px-3 py-2 rounded-xl hover:bg-emerald-100 transition-colors duration-200">Run search: ${escapeHtml(res.action.business_type)} in ${escapeHtml(res.action.location)} →</button>`;
       note.querySelector('button').onclick = ()=>{
-        $('business-type').value = res.action.business_type;
-        $('location').value = res.action.location;
+        $('search-input').value = `${res.action.business_type} in ${res.action.location}`;
         closeChat();
         $('search-form').requestSubmit();
       };

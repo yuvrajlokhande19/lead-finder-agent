@@ -24,6 +24,7 @@ from app.tools import (
     get_pitch_summary,
     get_service_types,
     get_llm_provider,
+    parse_search_query,
     quick_enrich,
     search_businesses,
 )
@@ -49,8 +50,7 @@ app = FastAPI(title="Website Lead Finder")
 
 
 class SearchRequest(BaseModel):
-    business_type: str
-    location: str
+    query: str
     max_results: int = 20
 
 
@@ -61,9 +61,22 @@ def index() -> FileResponse:
 
 @app.post("/api/search")
 def api_search(req: SearchRequest) -> dict:
+    parsed = parse_search_query(req.query)
+    if not parsed or not parsed.get("business_type"):
+        raise HTTPException(status_code=400, detail="Empty search")
+    if not parsed.get("location"):
+        raise HTTPException(
+            status_code=400,
+            detail="Include a city or area — e.g. \u201cdental clinic in Wardha\u201d",
+        )
     result = search_businesses(
-        req.business_type.strip(), req.location.strip(), req.max_results
+        parsed["business_type"], parsed["location"], req.max_results
     )
+    result["parsed"] = {
+        "business_type": parsed["business_type"],
+        "location": parsed["location"],
+        "via": parsed.get("via"),
+    }
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result["message"])
     return result
